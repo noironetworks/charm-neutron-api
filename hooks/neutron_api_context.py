@@ -260,6 +260,8 @@ class NeutronCCContext(context.NeutronContext):
         else:
             ctxt['enable_hyperv'] = False
 
+        if config('neutron-plugin') == 'aci':
+            ctxt.update(CiscoAciContext()())
         return ctxt
 
 
@@ -399,4 +401,21 @@ class MidonetContext(context.OSContextGenerator):
                 }
                 if self.context_complete(ctxt):
                     return ctxt
+        return {}
+
+class CiscoAciContext(context.OSContextGenerator):
+    def __init__(self, rel_name='neutron-plugin-api-subordinate'):
+        self.rel_name = rel_name
+        self.interfaces = [rel_name]
+
+    def __call__(self):
+        for rid in relation_ids(self.rel_name):
+            for unit in related_units(rid):
+                if str(unit).split('/')[0] == 'aci':
+                    rdata = relation_get(rid=rid, unit=unit)
+                    ctxt = {}
+                    for k in rdata.keys():
+                        ctxt[k] = rdata.get(k)
+                    if self.context_complete(ctxt):
+                        return ctxt
         return {}

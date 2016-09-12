@@ -911,6 +911,17 @@ class NeutronContext(OSContextGenerator):
 
         return mido_ctxt
 
+    def aci_ctxt(self):
+        driver = neutron_plugin_attribute(self.plugin, 'driver',
+                                          self.network_manager)
+        aci_config = neutron_plugin_attribute(self.plugin, 'config',
+                                          self.network_manager)
+        aci_ctxt = {'core_plugin': driver,
+                    'neutron_plugin': 'aci',
+                    'config': aci_config}
+
+        return aci_ctxt
+
     def __call__(self):
         if self.network_manager not in ['quantum', 'neutron']:
             return {}
@@ -934,6 +945,8 @@ class NeutronContext(OSContextGenerator):
             ctxt.update(self.pg_ctxt())
         elif self.plugin == 'midonet':
             ctxt.update(self.midonet_ctxt())
+        elif self.plugin == "aci":
+            ctxt.update(self.aci_ctxt())
 
         alchemy_flags = config('neutron-alchemy-flags')
         if alchemy_flags:
