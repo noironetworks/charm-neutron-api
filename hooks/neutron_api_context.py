@@ -390,8 +390,9 @@ class CiscoAciContext(context.OSContextGenerator):
     def __call__(self):
         for rid in relation_ids(self.rel_name):
             for unit in related_units(rid):
-                if str(unit).split('/')[0] == 'aci':
-                    rdata = relation_get(rid=rid, unit=unit)
+                rdata = relation_get(rid=rid, unit=unit)
+                plugin = rdata.get('neutron_plugin')
+                if str(plugin) == "aci":
                     ctxt = {}
                     for k in rdata.keys():
                         ctxt[k] = rdata.get(k)
