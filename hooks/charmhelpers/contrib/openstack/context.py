@@ -918,6 +918,7 @@ class NeutronContext(OSContextGenerator):
                                           self.network_manager)
         aci_ctxt = {'core_plugin': driver,
                     'neutron_plugin': 'aci',
+                    'neutron_security_groups': self.neutron_security_groups,
                     'config': aci_config}
 
         return aci_ctxt
