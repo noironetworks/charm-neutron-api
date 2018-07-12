@@ -42,70 +42,62 @@ class GeneralTests(CharmTestCase):
     def test_l2population(self):
         self.test_config.set('l2-population', True)
         self.test_config.set('neutron-plugin', 'ovs')
-        self.assertEquals(context.get_l2population(), True)
+        self.assertEqual(context.get_l2population(), True)
 
     def test_l2population_nonovs(self):
         self.test_config.set('l2-population', True)
         self.test_config.set('neutron-plugin', 'nsx')
-        self.assertEquals(context.get_l2population(), False)
+        self.assertEqual(context.get_l2population(), False)
 
     def test_get_tenant_network_types(self):
         self.test_config.set('overlay-network-type', 'gre')
-        self.assertEquals(
+        self.assertEqual(
             context._get_tenant_network_types(),
             ['gre', 'vlan', 'flat', 'local'])
 
     def test_get_tenant_network_types_multi(self):
         self.test_config.set('overlay-network-type', 'gre vxlan')
-        self.assertEquals(
+        self.assertEqual(
             context._get_tenant_network_types(),
             ['gre', 'vxlan', 'vlan', 'flat', 'local'])
 
     def test_get_tenant_network_types_unsupported(self):
         self.test_config.set('overlay-network-type', 'tokenring')
-        with self.assertRaises(ValueError) as _exceptctxt:
+        with self.assertRaises(ValueError):
             context._get_tenant_network_types()
-        self.assertEqual(_exceptctxt.exception.message,
-                         'Unsupported overlay-network-type tokenring')
 
     def test_get_tenant_network_types_default(self):
         self.test_config.set('overlay-network-type', 'gre vxlan')
         self.test_config.set('default-tenant-network-type', 'vxlan')
-        self.assertEquals(
+        self.assertEqual(
             context._get_tenant_network_types(),
             ['vxlan', 'gre', 'vlan', 'flat', 'local'])
 
     def test_get_tenant_network_types_default_dup(self):
         self.test_config.set('overlay-network-type', 'gre')
         self.test_config.set('default-tenant-network-type', 'vlan')
-        self.assertEquals(
+        self.assertEqual(
             context._get_tenant_network_types(),
             ['vlan', 'gre', 'flat', 'local'])
 
     def test_get_tenant_network_types_empty(self):
         self.test_config.set('overlay-network-type', '')
         self.test_config.set('default-tenant-network-type', 'vlan')
-        self.assertEquals(
+        self.assertEqual(
             context._get_tenant_network_types(),
             ['vlan', 'flat', 'local'])
 
     def test_get_tenant_network_types_unsupported_default(self):
         self.test_config.set('overlay-network-type', '')
         self.test_config.set('default-tenant-network-type', 'whizzy')
-        with self.assertRaises(ValueError) as _exceptctxt:
+        with self.assertRaises(ValueError):
             context._get_tenant_network_types()
-        self.assertEqual(_exceptctxt.exception.message,
-                         'Unsupported or unconfigured '
-                         'default-tenant-network-type whizzy')
 
     def test_get_tenant_network_types_unconfigured_default(self):
         self.test_config.set('overlay-network-type', 'gre')
         self.test_config.set('default-tenant-network-type', 'vxlan')
-        with self.assertRaises(ValueError) as _exceptctxt:
+        with self.assertRaises(ValueError):
             context._get_tenant_network_types()
-        self.assertEqual(_exceptctxt.exception.message,
-                         'Unsupported or unconfigured '
-                         'default-tenant-network-type vxlan')
 
     def test_get_l3ha(self):
         self.test_config.set('enable-l3ha', True)
@@ -113,7 +105,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', False)
         self.os_release.return_value = 'juno'
-        self.assertEquals(context.get_l3ha(), True)
+        self.assertEqual(context.get_l3ha(), True)
 
     def test_get_l3ha_prejuno(self):
         self.test_config.set('enable-l3ha', True)
@@ -121,7 +113,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', False)
         self.os_release.return_value = 'icehouse'
-        self.assertEquals(context.get_l3ha(), False)
+        self.assertEqual(context.get_l3ha(), False)
 
     def test_get_l3ha_l2pop(self):
         self.test_config.set('enable-l3ha', True)
@@ -129,7 +121,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', True)
         self.os_release.return_value = 'juno'
-        self.assertEquals(context.get_l3ha(), False)
+        self.assertEqual(context.get_l3ha(), False)
 
     def test_get_dvr(self):
         self.test_config.set('enable-dvr', True)
@@ -138,7 +130,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', True)
         self.os_release.return_value = 'juno'
-        self.assertEquals(context.get_dvr(), True)
+        self.assertEqual(context.get_dvr(), True)
 
     def test_get_dvr_explicit_off(self):
         self.test_config.set('enable-dvr', False)
@@ -147,7 +139,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', True)
         self.os_release.return_value = 'juno'
-        self.assertEquals(context.get_dvr(), False)
+        self.assertEqual(context.get_dvr(), False)
 
     def test_get_dvr_prejuno(self):
         self.test_config.set('enable-dvr', True)
@@ -156,7 +148,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', True)
         self.os_release.return_value = 'icehouse'
-        self.assertEquals(context.get_dvr(), False)
+        self.assertEqual(context.get_dvr(), False)
 
     def test_get_dvr_gre(self):
         self.test_config.set('enable-dvr', True)
@@ -165,7 +157,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', True)
         self.os_release.return_value = 'juno'
-        self.assertEquals(context.get_dvr(), False)
+        self.assertEqual(context.get_dvr(), False)
 
     def test_get_dvr_gre_kilo(self):
         self.test_config.set('enable-dvr', True)
@@ -174,7 +166,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', True)
         self.os_release.return_value = 'kilo'
-        self.assertEquals(context.get_dvr(), True)
+        self.assertEqual(context.get_dvr(), True)
 
     def test_get_dvr_vxlan_kilo(self):
         self.test_config.set('enable-dvr', True)
@@ -183,7 +175,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', True)
         self.os_release.return_value = 'kilo'
-        self.assertEquals(context.get_dvr(), True)
+        self.assertEqual(context.get_dvr(), True)
 
     def test_get_dvr_l3ha_on(self):
         self.test_config.set('enable-dvr', True)
@@ -192,7 +184,7 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', False)
         self.os_release.return_value = 'juno'
-        self.assertEquals(context.get_dvr(), False)
+        self.assertEqual(context.get_dvr(), False)
 
     def test_get_dvr_l2pop(self):
         self.test_config.set('enable-dvr', True)
@@ -201,7 +193,62 @@ class GeneralTests(CharmTestCase):
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', False)
         self.os_release.return_value = 'juno'
-        self.assertEquals(context.get_dvr(), False)
+        self.assertEqual(context.get_dvr(), False)
+
+    def test_get_dns_domain(self):
+        self.test_config.set('dns-domain', 'example.org.')
+        self.test_config.set('enable-ml2-dns', True)
+        self.os_release.return_value = 'mitaka'
+        self.assertEqual(context.get_dns_domain(), 'example.org.')
+
+    def test_get_dns_domain_bad_values(self):
+        self.os_release.return_value = 'mitaka'
+        self.test_config.set('enable-ml2-dns', True)
+        bad_values = ['example@foo.org',
+                      'exclamation!marks.notwelcom.ed',
+                      '%s.way.too.long' % ('x' * 64),
+                      '-hyphen.in.front',
+                      'hypen-.in.back',
+                      'no_.under_scor.es',
+                      ]
+
+        for value in bad_values:
+            self.test_config.set('dns-domain', value)
+            self.assertRaises(ValueError, context.get_dns_domain)
+
+    def test_get_ml2_mechanism_drivers(self):
+        self.os_release.return_value = 'mitaka'
+        self.assertEqual(context.get_ml2_mechanism_drivers(),
+                         'openvswitch,hyperv,l2population')
+
+    def test_get_ml2_mechanism_drivers_kilo(self):
+        self.os_release.return_value = 'kilo'
+        self.assertEqual(context.get_ml2_mechanism_drivers(),
+                         'openvswitch,hyperv,l2population')
+
+    def test_get_ml2_mechanism_drivers_liberty(self):
+        self.os_release.return_value = 'liberty'
+        self.assertEqual(context.get_ml2_mechanism_drivers(),
+                         'openvswitch,l2population')
+
+    def test_get_ml2_mechanism_drivers_no_l2pop(self):
+        self.os_release.return_value = 'mitaka'
+        self.test_config.set('l2-population', False)
+        self.assertEqual(context.get_ml2_mechanism_drivers(),
+                         'openvswitch,hyperv')
+
+    def test_get_ml2_mechanism_drivers_sriov(self):
+        self.os_release.return_value = 'mitaka'
+        self.test_config.set('enable-sriov', True)
+        self.assertEqual(context.get_ml2_mechanism_drivers(),
+                         'openvswitch,hyperv,l2population,sriovnicswitch')
+
+    def test_get_ml2_mechanism_drivers_no_l2pop_sriov(self):
+        self.os_release.return_value = 'mitaka'
+        self.test_config.set('enable-sriov', True)
+        self.test_config.set('l2-population', False)
+        self.assertEqual(context.get_ml2_mechanism_drivers(),
+                         'openvswitch,hyperv,sriovnicswitch')
 
 
 class IdentityServiceContext(CharmTestCase):
@@ -235,14 +282,14 @@ class IdentityServiceContext(CharmTestCase):
         }
         _rget.return_value = id_data
         ids_ctxt = context.IdentityServiceContext()
-        self.assertEquals(ids_ctxt()['region'], 'region457')
+        self.assertEqual(ids_ctxt()['region'], 'region457')
 
     @patch.object(charmhelpers.contrib.openstack.context, 'relation_ids')
     @patch.object(charmhelpers.contrib.openstack.context, 'log')
     def test_ids_ctxt_no_rels(self, _log, _rids):
         _rids.return_value = []
         ids_ctxt = context.IdentityServiceContext()
-        self.assertEquals(ids_ctxt(), None)
+        self.assertEqual(ids_ctxt(), None)
 
 
 class HAProxyContextTest(CharmTestCase):
@@ -256,14 +303,17 @@ class HAProxyContextTest(CharmTestCase):
     def tearDown(self):
         super(HAProxyContextTest, self).tearDown()
 
+    @patch.object(charmhelpers.contrib.openstack.context, 'mkdir')
     @patch.object(charmhelpers.contrib.openstack.context, 'relation_ids')
     @patch.object(charmhelpers.contrib.openstack.context, 'log')
-    def test_context_No_peers(self, _log, _rids):
+    def test_context_No_peers(self, _log, _rids, _mkdir):
         _rids.return_value = []
         hap_ctxt = context.HAProxyContext()
-        with patch('__builtin__.__import__'):
+        with patch('builtins.__import__'):
             self.assertTrue('units' not in hap_ctxt())
 
+    @patch.object(charmhelpers.contrib.openstack.context, 'get_relation_ip')
+    @patch.object(charmhelpers.contrib.openstack.context, 'mkdir')
     @patch.object(
         charmhelpers.contrib.openstack.context, 'get_netmask_for_address')
     @patch.object(
@@ -276,11 +326,12 @@ class HAProxyContextTest(CharmTestCase):
     @patch.object(charmhelpers.contrib.openstack.context, 'relation_ids')
     @patch.object(charmhelpers.contrib.openstack.context, 'log')
     @patch.object(charmhelpers.contrib.openstack.context, 'kv')
-    @patch('__builtin__.__import__')
-    @patch('__builtin__.open')
+    @patch('builtins.__import__')
+    @patch('builtins.open')
     def test_context_peers(self, _open, _import, _kv, _log, _rids, _runits,
                            _rget, _uget, _lunit, _config,
-                           _get_address_in_network, _get_netmask_for_address):
+                           _get_address_in_network, _get_netmask_for_address,
+                           _mkdir, _get_relation_ip):
         unit_addresses = {
             'neutron-api-0': '10.10.10.10',
             'neutron-api-1': '10.10.10.11',
@@ -290,6 +341,7 @@ class HAProxyContextTest(CharmTestCase):
         _rget.return_value = unit_addresses['neutron-api-0']
         _lunit.return_value = "neutron-api/1"
         _uget.return_value = unit_addresses['neutron-api-1']
+        _get_relation_ip.return_value = unit_addresses['neutron-api-1']
         _config.return_value = None
         _get_address_in_network.return_value = None
         _get_netmask_for_address.return_value = '255.255.255.0'
@@ -310,10 +362,12 @@ class HAProxyContextTest(CharmTestCase):
             'default_backend': '10.10.10.11',
             'service_ports': service_ports,
             'neutron_bind_port': 9686,
+            'ipv6_enabled': True,
         }
         _import().api_port.return_value = 9696
         hap_ctxt = context.HAProxyContext()
-        self.assertEquals(hap_ctxt(), ctxt_data)
+        self.maxDiff = None
+        self.assertEqual(hap_ctxt(), ctxt_data)
         _open.assert_called_with('/etc/default/haproxy', 'w')
 
 
@@ -354,13 +408,14 @@ class NeutronCCContextTest(CharmTestCase):
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
     def test_neutroncc_context_no_setting(self, _import, plugin, nm):
         plugin.return_value = None
         ctxt_data = {
             'debug': True,
             'enable_dvr': False,
             'l3_ha': False,
+            'mechanism_drivers': 'openvswitch,l2population',
             'dhcp_agents_per_network': 3,
             'enable_sriov': False,
             'external_network': 'bob',
@@ -382,16 +437,108 @@ class NeutronCCContextTest(CharmTestCase):
             'quota_vip': 10,
             'vlan_ranges': 'physnet1:1000:2000',
             'vni_ranges': '1001:2000',
-            'enable_ml2_port_security': True,
-            'enable_hyperv': False
+            'extension_drivers': 'port_security',
+            'service_plugins': (
+                'neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,'
+                'neutron.services.firewall.fwaas_plugin.FirewallPlugin,'
+                'neutron.services.loadbalancer.plugin.LoadBalancerPlugin,'
+                'neutron.services.vpn.plugin.VPNDriverPlugin,'
+                'neutron.services.metering.metering_plugin.MeteringPlugin'),
         }
         napi_ctxt = context.NeutronCCContext()
+        self.os_release.return_value = 'icehouse'
         with patch.object(napi_ctxt, '_ensure_packages'):
-            self.assertEquals(ctxt_data, napi_ctxt())
+            self.assertEqual(ctxt_data, napi_ctxt())
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
+    def test_neutroncc_context_no_setting_mitaka(self, _import, plugin, nm):
+        plugin.return_value = None
+        ctxt_data = {
+            'debug': True,
+            'enable_dvr': False,
+            'l3_ha': False,
+            'mechanism_drivers': 'openvswitch,hyperv,l2population',
+            'dhcp_agents_per_network': 3,
+            'enable_sriov': False,
+            'external_network': 'bob',
+            'global_physnet_mtu': 1500,
+            'neutron_bind_port': self.api_port,
+            'verbose': True,
+            'l2_population': True,
+            'overlay_network_type': 'gre',
+            'path_mtu': 1500,
+            'tenant_network_types': 'gre,vlan,flat,local',
+            'quota_floatingip': 50,
+            'quota_health_monitors': -1,
+            'quota_member': -1,
+            'quota_network': 10,
+            'quota_pool': 10,
+            'quota_port': 50,
+            'quota_router': 10,
+            'quota_security_group': 10,
+            'quota_security_group_rule': 100,
+            'quota_subnet': 10,
+            'quota_vip': 10,
+            'vlan_ranges': 'physnet1:1000:2000',
+            'vni_ranges': '1001:2000',
+            'extension_drivers': 'port_security',
+            'service_plugins': 'router,firewall,lbaas,vpnaas,metering',
+        }
+        napi_ctxt = context.NeutronCCContext()
+        self.maxDiff = None
+        self.os_release.return_value = 'mitaka'
+        with patch.object(napi_ctxt, '_ensure_packages'):
+            self.assertEqual(ctxt_data, napi_ctxt())
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    def test_neutroncc_context_dns_setting(self, plugin, nm):
+        plugin.return_value = None
+        self.test_config.set('enable-ml2-dns', True)
+        self.test_config.set('dns-domain', 'example.org.')
+        self.os_release.return_value = 'mitaka'
+        napi_ctxt = context.NeutronCCContext()
+        with patch.object(napi_ctxt, '_ensure_packages'):
+            ctxt = napi_ctxt()
+            self.assertEqual('example.org.', ctxt['dns_domain'])
+            self.assertEqual('port_security,dns', ctxt['extension_drivers'])
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    def test_neutroncc_context_dns_no_port_security_setting(self,
+                                                            plugin, nm):
+        """Verify extension drivers without port security."""
+        plugin.return_value = None
+        self.test_config.set('enable-ml2-port-security', False)
+        self.test_config.set('enable-ml2-dns', True)
+        self.test_config.set('dns-domain', 'example.org.')
+        self.os_release.return_value = 'mitaka'
+        napi_ctxt = context.NeutronCCContext()
+        with patch.object(napi_ctxt, '_ensure_packages'):
+            ctxt = napi_ctxt()
+            self.assertEqual('example.org.', ctxt['dns_domain'])
+            self.assertEqual('dns', ctxt['extension_drivers'])
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    def test_neutroncc_context_dns_kilo(self, plugin, nm):
+        """Verify dns extension and domain are not specified in kilo."""
+        plugin.return_value = None
+        self.test_config.set('enable-ml2-port-security', False)
+        self.test_config.set('enable-ml2-dns', True)
+        self.test_config.set('dns-domain', 'example.org.')
+        self.os_release.return_value = 'kilo'
+        napi_ctxt = context.NeutronCCContext()
+        with patch.object(napi_ctxt, '_ensure_packages'):
+            ctxt = napi_ctxt()
+            self.assertFalse('dns_domain' in ctxt)
+            self.assertFalse('extension_drivers' in ctxt)
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    @patch('builtins.__import__')
     def test_neutroncc_context_vxlan(self, _import, plugin, nm):
         plugin.return_value = None
         self.test_config.set('flat-network-providers', 'physnet2 physnet3')
@@ -401,6 +548,7 @@ class NeutronCCContextTest(CharmTestCase):
             'debug': True,
             'enable_dvr': False,
             'l3_ha': False,
+            'mechanism_drivers': 'openvswitch,l2population',
             'dhcp_agents_per_network': 3,
             'enable_sriov': False,
             'external_network': 'bob',
@@ -423,28 +571,36 @@ class NeutronCCContextTest(CharmTestCase):
             'vlan_ranges': 'physnet1:1000:2000',
             'vni_ranges': '1001:2000,3001:4000',
             'network_providers': 'physnet2,physnet3',
-            'enable_ml2_port_security': True,
-            'enable_hyperv': False
+            'extension_drivers': 'port_security',
+            'service_plugins': (
+                'neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,'
+                'neutron.services.firewall.fwaas_plugin.FirewallPlugin,'
+                'neutron.services.loadbalancer.plugin.LoadBalancerPlugin,'
+                'neutron.services.vpn.plugin.VPNDriverPlugin,'
+                'neutron.services.metering.metering_plugin.MeteringPlugin'),
         }
         napi_ctxt = context.NeutronCCContext()
+        self.os_release.return_value = 'icehouse'
         with patch.object(napi_ctxt, '_ensure_packages'):
-            self.assertEquals(ctxt_data, napi_ctxt())
+            self.assertEqual(ctxt_data, napi_ctxt())
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
     def test_neutroncc_context_l3ha(self, _import, plugin, nm):
         plugin.return_value = None
         self.test_config.set('enable-l3ha', True)
+        self.test_config.set('enable-qos', False)
         self.test_config.set('overlay-network-type', 'gre')
         self.test_config.set('neutron-plugin', 'ovs')
         self.test_config.set('l2-population', False)
         self.os_release.return_value = 'juno'
+        self.maxDiff = None
         ctxt_data = {
             'debug': True,
             'enable_dvr': False,
             'l3_ha': True,
-            'enable_sriov': False,
+            'mechanism_drivers': 'openvswitch',
             'external_network': 'bob',
             'neutron_bind_port': self.api_port,
             'verbose': True,
@@ -454,6 +610,7 @@ class NeutronCCContextTest(CharmTestCase):
             'max_l3_agents_per_router': 2,
             'min_l3_agents_per_router': 2,
             'dhcp_agents_per_network': 3,
+            'enable_sriov': False,
             'quota_floatingip': 50,
             'quota_health_monitors': -1,
             'quota_member': -1,
@@ -467,25 +624,49 @@ class NeutronCCContextTest(CharmTestCase):
             'quota_vip': 10,
             'vlan_ranges': 'physnet1:1000:2000',
             'vni_ranges': '1001:2000',
-            'enable_ml2_port_security': True,
-            'enable_hyperv': False
+            'extension_drivers': 'port_security',
+            'service_plugins': (
+                'neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,'
+                'neutron.services.firewall.fwaas_plugin.FirewallPlugin,'
+                'neutron.services.loadbalancer.plugin.LoadBalancerPlugin,'
+                'neutron.services.vpn.plugin.VPNDriverPlugin,'
+                'neutron.services.metering.metering_plugin.MeteringPlugin'),
         }
         napi_ctxt = context.NeutronCCContext()
         with patch.object(napi_ctxt, '_ensure_packages'):
-            self.assertEquals(ctxt_data, napi_ctxt())
+            self.assertEqual(ctxt_data, napi_ctxt())
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
+    def test_neutroncc_context_l3ha_l3_agents(self, _import, plugin, nm):
+        plugin.return_value = None
+        self.os_release.return_value = 'juno'
+        self.test_config.set('enable-l3ha', True)
+        self.test_config.set('l2-population', False)
+        self.test_config.set('max-l3-agents-per-router', 2)
+        self.test_config.set('min-l3-agents-per-router', 3)
+        napi_ctxt = context.NeutronCCContext()
+        with patch.object(napi_ctxt, '_ensure_packages'):
+            self.assertRaises(ValueError, napi_ctxt)
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    @patch('builtins.__import__')
     def test_neutroncc_context_sriov(self, _import, plugin, nm):
         plugin.return_value = None
         self.test_config.set('enable-sriov', True)
+        self.test_config.set('supported-pci-vendor-devs',
+                             '1111:3333  2222:4444')
         ctxt_data = {
             'debug': True,
             'enable_dvr': False,
             'l3_ha': False,
+            'mechanism_drivers': 'openvswitch,hyperv,l2population'
+                                 ',sriovnicswitch',
             'dhcp_agents_per_network': 3,
             'enable_sriov': True,
+            'supported_pci_vendor_devs': '1111:3333,2222:4444',
             'external_network': 'bob',
             'neutron_bind_port': self.api_port,
             'verbose': True,
@@ -505,16 +686,17 @@ class NeutronCCContextTest(CharmTestCase):
             'quota_vip': 10,
             'vlan_ranges': 'physnet1:1000:2000',
             'vni_ranges': '1001:2000',
-            'enable_ml2_port_security': True,
-            'enable_hyperv': False
+            'extension_drivers': 'port_security',
+            'service_plugins': 'router,firewall,lbaas,vpnaas,metering',
         }
         napi_ctxt = context.NeutronCCContext()
+        self.os_release.return_value = 'kilo'
         with patch.object(napi_ctxt, '_ensure_packages'):
-            self.assertEquals(ctxt_data, napi_ctxt())
+            self.assertEqual(ctxt_data, napi_ctxt())
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
     def test_neutroncc_context_unsupported_overlay(self, _import, plugin, nm):
         plugin.return_value = None
         self.test_config.set('overlay-network-type', 'bobswitch')
@@ -523,24 +705,25 @@ class NeutronCCContextTest(CharmTestCase):
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
     def test_neutroncc_context_api_rel(self, _import, plugin, nm):
         nova_url = 'http://127.0.0.10'
         plugin.return_value = None
+        self.os_release.return_value = 'havana'
         self.related_units.return_value = ['unit1']
         self.relation_ids.return_value = ['rid2']
         self.test_relation.set({'nova_url': nova_url,
                                 'restart_trigger': 'bob'})
         napi_ctxt = context.NeutronCCContext()
-        self.assertEquals(nova_url, napi_ctxt()['nova_url'])
-        self.assertEquals('bob', napi_ctxt()['restart_trigger'])
-        self.assertEquals(self.api_port, napi_ctxt()['neutron_bind_port'])
+        self.assertEqual(nova_url, napi_ctxt()['nova_url'])
+        self.assertEqual('bob', napi_ctxt()['restart_trigger'])
+        self.assertEqual(self.api_port, napi_ctxt()['neutron_bind_port'])
 
     def test_neutroncc_context_manager(self):
         napi_ctxt = context.NeutronCCContext()
-        self.assertEquals(napi_ctxt.network_manager, 'neutron')
-        self.assertEquals(napi_ctxt.plugin, 'ovs')
-        self.assertEquals(napi_ctxt.neutron_security_groups, True)
+        self.assertEqual(napi_ctxt.network_manager, 'neutron')
+        self.assertEqual(napi_ctxt.plugin, 'ovs')
+        self.assertEqual(napi_ctxt.neutron_security_groups, True)
 
     def test_neutroncc_context_manager_pkgs(self):
         napi_ctxt = context.NeutronCCContext()
@@ -550,9 +733,10 @@ class NeutronCCContextTest(CharmTestCase):
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
     def test_neutroncc_context_nsx(self, _import, plugin, nm):
         plugin.return_value = 'nsx'
+        self.os_release.return_value = 'havana'
         self.related_units.return_value = []
         self.test_config.set('neutron-plugin', 'nsx')
         napi_ctxt = context.NeutronCCContext()()
@@ -564,14 +748,15 @@ class NeutronCCContextTest(CharmTestCase):
             'nsx_tz_uuid': 'tzuuid',
             'nsx_username': 'bob',
         }
-        for key in expect.iterkeys():
-            self.assertEquals(napi_ctxt[key], expect[key])
+        for key in expect.keys():
+            self.assertEqual(napi_ctxt[key], expect[key])
 
     @patch.object(context.NeutronCCContext, 'network_manager')
     @patch.object(context.NeutronCCContext, 'plugin')
-    @patch('__builtin__.__import__')
+    @patch('builtins.__import__')
     def test_neutroncc_context_nuage(self, _import, plugin, nm):
         plugin.return_value = 'vsp'
+        self.os_release.return_value = 'havana'
         self.related_units.return_value = ['vsdunit1']
         self.relation_ids.return_value = ['vsdrid2']
         self.test_config.set('neutron-plugin', 'vsp')
@@ -583,8 +768,116 @@ class NeutronCCContextTest(CharmTestCase):
             'vsd_base_uri': '/nuage/api/v1_0',
             'vsd_netpart_name': 'foo-enterprise',
         }
-        for key in expect.iterkeys():
-            self.assertEquals(napi_ctxt[key], expect[key])
+        for key in expect.keys():
+            self.assertEqual(napi_ctxt[key], expect[key])
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    @patch('builtins.__import__')
+    def test_neutroncc_context_qos(self, _import, plugin, nm):
+        plugin.return_value = None
+        self.os_release.return_value = 'mitaka'
+        self.test_config.set('enable-qos', True)
+        self.test_config.set('enable-ml2-port-security', False)
+        napi_ctxt = context.NeutronCCContext()()
+        service_plugins = ('router,firewall,lbaas,vpnaas,metering,qos')
+        expect = {
+            'extension_drivers': 'qos',
+            'service_plugins': service_plugins,
+        }
+        for key in expect.keys():
+            self.assertEqual(napi_ctxt[key], expect[key])
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    @patch('builtins.__import__')
+    def test_neutroncc_context_service_plugins(self, _import, plugin, nm):
+        plugin.return_value = None
+        self.test_config.set('enable-qos', False)
+        self.test_config.set('enable-ml2-port-security', False)
+        # icehouse
+        self.os_release.return_value = 'icehouse'
+        service_plugins = (
+            'neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,'
+            'neutron.services.firewall.fwaas_plugin.FirewallPlugin,'
+            'neutron.services.loadbalancer.plugin.LoadBalancerPlugin,'
+            'neutron.services.vpn.plugin.VPNDriverPlugin,'
+            'neutron.services.metering.metering_plugin.MeteringPlugin')
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+        # juno
+        self.os_release.return_value = 'juno'
+        service_plugins = (
+            'neutron.services.l3_router.l3_router_plugin.L3RouterPlugin,'
+            'neutron.services.firewall.fwaas_plugin.FirewallPlugin,'
+            'neutron.services.loadbalancer.plugin.LoadBalancerPlugin,'
+            'neutron.services.vpn.plugin.VPNDriverPlugin,'
+            'neutron.services.metering.metering_plugin.MeteringPlugin')
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+        # kilo
+        self.os_release.return_value = 'kilo'
+        service_plugins = 'router,firewall,lbaas,vpnaas,metering'
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+        # liberty
+        self.os_release.return_value = 'liberty'
+        service_plugins = 'router,firewall,lbaas,vpnaas,metering'
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+        # mitaka
+        self.os_release.return_value = 'mitaka'
+        service_plugins = 'router,firewall,lbaas,vpnaas,metering'
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+        # newton
+        self.os_release.return_value = 'newton'
+        service_plugins = (
+            'router,firewall,vpnaas,metering,'
+            'neutron_lbaas.services.loadbalancer.plugin.LoadBalancerPluginv2')
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+        # ocata
+        self.os_release.return_value = 'ocata'
+        service_plugins = (
+            'router,firewall,vpnaas,metering,'
+            'neutron_lbaas.services.loadbalancer.plugin.LoadBalancerPluginv2,'
+            'segments'
+        )
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+        # pike
+        self.os_release.return_value = 'pike'
+        service_plugins = (
+            'router,firewall,metering,segments,'
+            'neutron_lbaas.services.loadbalancer.plugin.LoadBalancerPluginv2,'
+            'neutron_dynamic_routing.services.bgp.bgp_plugin.BgpPlugin')
+        self.assertEqual(context.NeutronCCContext()()['service_plugins'],
+                         service_plugins)
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    def test_neutroncc_context_physical_network_mtus(self, plugin, nm):
+        plugin.return_value = None
+        self.test_config.set('physical-network-mtus', 'provider1:4000')
+        self.os_release.return_value = 'mitaka'
+        napi_ctxt = context.NeutronCCContext()
+        with patch.object(napi_ctxt, '_ensure_packages'):
+            ctxt = napi_ctxt()
+            self.assertEqual(ctxt['physical_network_mtus'], 'provider1:4000')
+
+    @patch.object(context.NeutronCCContext, 'network_manager')
+    @patch.object(context.NeutronCCContext, 'plugin')
+    def test_neutroncc_context_physical_network_mtus_multi(self, plugin, nm):
+        plugin.return_value = None
+        self.test_config.set('physical-network-mtus',
+                             'provider1:4000 provider2:5000')
+        self.os_release.return_value = 'mitaka'
+        napi_ctxt = context.NeutronCCContext()
+        with patch.object(napi_ctxt, '_ensure_packages'):
+            ctxt = napi_ctxt()
+            self.assertEqual(ctxt['physical_network_mtus'],
+                             'provider1:4000,provider2:5000')
 
 
 class EtcdContextTest(CharmTestCase):
@@ -603,7 +896,7 @@ class EtcdContextTest(CharmTestCase):
         ctxt = context.EtcdContext()()
         expect = {'cluster': ''}
 
-        self.assertEquals(expect, ctxt)
+        self.assertEqual(expect, ctxt)
 
     def test_some_related_units(self):
         self.related_units.return_value = ['unit1']
@@ -617,7 +910,7 @@ class EtcdContextTest(CharmTestCase):
         ctxt = context.EtcdContext()()
         expect = {'cluster': result}
 
-        self.assertEquals(expect, ctxt)
+        self.assertEqual(expect, ctxt)
 
     def test_early_exit(self):
         self.test_config.set('neutron-plugin', 'notCalico')
@@ -631,7 +924,7 @@ class EtcdContextTest(CharmTestCase):
         ctxt = context.EtcdContext()()
         expect = {'cluster': ''}
 
-        self.assertEquals(expect, ctxt)
+        self.assertEqual(expect, ctxt)
 
 
 class NeutronApiSDNContextTest(CharmTestCase):
@@ -645,12 +938,12 @@ class NeutronApiSDNContextTest(CharmTestCase):
 
     def test_init(self):
         napisdn_ctxt = context.NeutronApiSDNContext()
-        self.assertEquals(
+        self.assertEqual(
             napisdn_ctxt.interfaces,
             ['neutron-plugin-api-subordinate']
         )
-        self.assertEquals(napisdn_ctxt.services, ['neutron-api'])
-        self.assertEquals(
+        self.assertEqual(napisdn_ctxt.services, ['neutron-api'])
+        self.assertEqual(
             napisdn_ctxt.config_file,
             '/etc/neutron/neutron.conf'
         )
@@ -667,7 +960,7 @@ class NeutronApiSDNContextTest(CharmTestCase):
         self.relation_ids.return_value = ['rid2']
         self.related_units.return_value = ['unit1']
         napisdn_ctxt = context.NeutronApiSDNContext()()
-        self.assertEquals(napisdn_ctxt, expect)
+        self.assertEqual(napisdn_ctxt, expect)
 
     def test_defaults(self):
         self.ctxt_check(
@@ -762,16 +1055,105 @@ class NeutronApiSDNConfigFileContextTest(CharmTestCase):
         self.relation_ids.return_value = ['rid2']
         self.related_units.return_value = ['unit1']
         napisdn_ctxt = context.NeutronApiSDNConfigFileContext()()
-        self.assertEquals(napisdn_ctxt, {
+        self.assertEqual(napisdn_ctxt, {
             'config': '/etc/neutron/superplugin.ini'
         })
 
     def test_default(self):
         self.relation_ids.return_value = []
         napisdn_ctxt = context.NeutronApiSDNConfigFileContext()()
-        self.assertEquals(napisdn_ctxt, {
+        self.assertEqual(napisdn_ctxt, {
             'config': '/etc/neutron/plugins/ml2/ml2_conf.ini'
         })
+
+
+class NeutronApiApiPasteContextTest(CharmTestCase):
+
+    def setUp(self):
+        super(NeutronApiApiPasteContextTest, self).setUp(
+            context, TO_PATCH)
+        self.relation_get.side_effect = self.test_relation.get
+
+    def tearDown(self):
+        super(NeutronApiApiPasteContextTest, self).tearDown()
+
+    def test_default(self):
+        middleware = []
+
+        self.test_relation.set({
+            'extra_middleware': repr(middleware)
+        })
+
+        self.relation_ids.return_value = ['rid']
+        self.related_units.return_value = ['testunit']
+
+        self.assertRaises(ValueError, context.NeutronApiApiPasteContext())
+
+    def test_string(self):
+        self.test_relation.set({'extra_middleware': 'n42'})
+
+        self.relation_ids.return_value = ['rid']
+        self.related_units.return_value = ['testunit']
+
+        self.assertRaises(ValueError, context.NeutronApiApiPasteContext())
+
+    def test_dict(self):
+        self.test_relation.set({'extra_middleware':
+                                {'dict_with': 'something'}})
+
+        self.relation_ids.return_value = ['rid']
+        self.related_units.return_value = ['testunit']
+
+        self.assertRaises(ValueError, context.NeutronApiApiPasteContext())
+
+    def test_configset(self):
+        middleware = [{'name': 'middleware_1',
+                       'type': 'filter',
+                       'config': {'setting_1': 'value_1'}},
+                      {'name': 'middleware_2',
+                       'type': 'app',
+                       'config': {'setting_2': 'value_2'}}
+                      ]
+
+        # note repr is needed to simulate charm-helpers behavior
+        # with regards to object serialization - the context
+        # implementation should safely eval the string instead
+        # of just using it
+        self.test_relation.set({
+            'extra_middleware': repr(middleware)
+        })
+        self.relation_ids.return_value = ['rid2']
+        self.related_units.return_value = ['unit1']
+        napiapipaste_ctxt = context.NeutronApiApiPasteContext()()
+        self.assertEqual(napiapipaste_ctxt, {'extra_middleware': middleware})
+
+    def __test_arg(self, key):
+        middleware = [{'name': 'middleware_1',
+                       'type': 'filter',
+                       'config': {'setting_1': 'value_1'}},
+                      {'name': 'middleware_2',
+                       'type': 'composite',
+                       'config': {'setting_2': 'value_2'}}]
+        # invalidate a key
+        middleware[0][key] = None
+
+        self.test_relation.set({
+            'extra_middleware': repr(middleware)
+        })
+
+        self.relation_ids.return_value = ['rid']
+        self.related_units.return_value = ['testunit']
+
+        self.assertRaises(ValueError, context.NeutronApiApiPasteContext())
+
+    def test_no_type(self):
+        self.__test_arg('type')
+
+    def test_no_name(self):
+        self.__test_arg('name')
+
+    def test_no_config(self):
+        self.__test_arg('config')
 
 
 class MidonetContextTest(CharmTestCase):
@@ -791,7 +1173,7 @@ class MidonetContextTest(CharmTestCase):
         ctxt = context.MidonetContext()()
         expect = {}
 
-        self.assertEquals(expect, ctxt)
+        self.assertEqual(expect, ctxt)
 
     def test_some_related_units(self):
         self.related_units.return_value = ['unit1']
@@ -802,4 +1184,51 @@ class MidonetContextTest(CharmTestCase):
         expect = {'midonet_api_ip': '11.11.11.11',
                   'midonet_api_port': '8080'}
 
-        self.assertEquals(expect, ctxt)
+        self.assertEqual(expect, ctxt)
+
+
+class DesignateContextTest(CharmTestCase):
+
+    def setUp(self):
+        super(DesignateContextTest, self).setUp(context, TO_PATCH)
+        self.relation_get.side_effect = self.test_relation.get
+
+    def tearDown(self):
+        super(DesignateContextTest, self).tearDown()
+
+    def test_designate_no_related_units(self):
+        self.related_units.return_value = []
+        ctxt = context.DesignateContext()()
+        expect = {}
+
+        self.assertEqual(expect, ctxt)
+
+    def test_designate_related_units_no_reverse_dns_lookup(self):
+        self.config.side_effect = self.test_config.get
+        self.related_units.return_value = ['unit1']
+        self.relation_ids.return_value = ['rid1']
+        self.test_relation.set({'endpoint': 'http://1.1.1.1:9001'})
+        self.test_config.set('reverse-dns-lookup', False)
+        ctxt = context.DesignateContext()()
+        expect = {'enable_designate': True,
+                  'designate_endpoint': 'http://1.1.1.1:9001',
+                  'allow_reverse_dns_lookup': False}
+
+        self.assertEqual(expect, ctxt)
+
+    def test_designate_related_units_and_reverse_dns_lookup(self):
+        self.config.side_effect = self.test_config.get
+        self.related_units.return_value = ['unit1']
+        self.relation_ids.return_value = ['rid1']
+        self.test_relation.set({'endpoint': 'http://1.1.1.1:9001'})
+        self.test_config.set('reverse-dns-lookup', True)
+        self.test_config.set('ipv4-ptr-zone-prefix-size', 24)
+        self.test_config.set('ipv6-ptr-zone-prefix-size', 64)
+        ctxt = context.DesignateContext()()
+        expect = {'enable_designate': True,
+                  'designate_endpoint': 'http://1.1.1.1:9001',
+                  'allow_reverse_dns_lookup': True,
+                  'ipv4_ptr_zone_prefix_size': 24,
+                  'ipv6_ptr_zone_prefix_size': 64}
+
+        self.assertEqual(expect, ctxt)

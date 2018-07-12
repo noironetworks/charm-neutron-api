@@ -19,9 +19,10 @@ from mock import patch
 os.environ['JUJU_UNIT_NAME'] = 'neutron-api'
 
 with patch('charmhelpers.core.hookenv.config') as config:
-    config.return_value = 'ovs'
-    with patch('neutron_api_utils.register_configs') as register_configs:
-        import openstack_upgrade
+    with patch('neutron_api_utils.restart_map'):
+        config.return_value = 'ovs'
+        with patch('neutron_api_utils.register_configs') as register_configs:
+            import openstack_upgrade
 
 from test_utils import CharmTestCase
 
@@ -40,11 +41,9 @@ class TestNeutronAPIUpgradeActions(CharmTestCase):
     @patch('charmhelpers.contrib.openstack.utils.juju_log')
     @patch('charmhelpers.contrib.openstack.utils.config')
     @patch('charmhelpers.contrib.openstack.utils.action_set')
-    @patch('charmhelpers.contrib.openstack.utils.git_install_requested')
     @patch('charmhelpers.contrib.openstack.utils.openstack_upgrade_available')
-    def test_openstack_upgrade_true(self, upgrade_avail, git_requested,
+    def test_openstack_upgrade_true(self, upgrade_avail,
                                     action_set, config, log):
-        git_requested.return_value = False
         upgrade_avail.return_value = True
         config.return_value = True
 
@@ -56,11 +55,9 @@ class TestNeutronAPIUpgradeActions(CharmTestCase):
     @patch('charmhelpers.contrib.openstack.utils.juju_log')
     @patch('charmhelpers.contrib.openstack.utils.config')
     @patch('charmhelpers.contrib.openstack.utils.action_set')
-    @patch('charmhelpers.contrib.openstack.utils.git_install_requested')
     @patch('charmhelpers.contrib.openstack.utils.openstack_upgrade_available')
-    def test_openstack_upgrade_false(self, upgrade_avail, git_requested,
+    def test_openstack_upgrade_false(self, upgrade_avail,
                                      action_set, config, log):
-        git_requested.return_value = False
         upgrade_avail.return_value = True
         config.return_value = False
 

@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ast
+import re
+
 from collections import OrderedDict
 
 from charmhelpers.core.hookenv import (
@@ -20,6 +23,8 @@ from charmhelpers.core.hookenv import (
     related_units,
     relation_get,
     log,
+    DEBUG,
+    ERROR,
 )
 from charmhelpers.contrib.openstack import context
 from charmhelpers.contrib.hahelpers.cluster import (
@@ -28,6 +33,7 @@ from charmhelpers.contrib.hahelpers.cluster import (
 )
 from charmhelpers.contrib.openstack.utils import (
     os_release,
+    CompareOpenStackReleases,
 )
 
 VLAN = 'vlan'
@@ -38,6 +44,23 @@ LOCAL = 'local'
 OVERLAY_NET_TYPES = [VXLAN, GRE]
 NON_OVERLAY_NET_TYPES = [VLAN, FLAT, LOCAL]
 TENANT_NET_TYPES = [VXLAN, GRE, VLAN, FLAT, LOCAL]
+
+EXTENSION_DRIVER_PORT_SECURITY = 'port_security'
+EXTENSION_DRIVER_DNS = 'dns'
+EXTENSION_DRIVER_QOS = 'qos'
+
+ETC_NEUTRON = '/etc/neutron'
+
+NOTIFICATION_TOPICS = [
+    'notifications',
+]
+
+# Domain name validation regex which is used to certify that
+# the domain-name consists only of valid characters, is not
+# longer than 63 characters in length for any name segment,
+# and each segment does not begin or end with a hyphen.
+DOMAIN_NAME_REGEX = re.compile(r'^(?!-)[A-Z\d-]{1,63}(?<!-)$',
+                               re.IGNORECASE)
 
 
 def get_l2population():
@@ -85,10 +108,11 @@ def get_tenant_network_types():
 
 def get_l3ha():
     if config('enable-l3ha'):
-        if os_release('neutron-server') < 'juno':
+        release = os_release('neutron-server')
+        if CompareOpenStackReleases(release) < 'juno':
             log('Disabling L3 HA, enable-l3ha is not valid before Juno')
             return False
-        if get_l2population():
+        if CompareOpenStackReleases(release) < 'newton' and get_l2population():
             log('Disabling L3 HA, l2-population must be disabled with L3 HA')
             return False
         return True
@@ -98,21 +122,98 @@ def get_l3ha():
 
 def get_dvr():
     if config('enable-dvr'):
-        if os_release('neutron-server') < 'juno':
+        release = os_release('neutron-server')
+        if CompareOpenStackReleases(release) < 'juno':
             log('Disabling DVR, enable-dvr is not valid before Juno')
             return False
-        if os_release('neutron-server') == 'juno':
+        if CompareOpenStackReleases(release) == 'juno':
             if VXLAN not in config('overlay-network-type').split():
                 log('Disabling DVR, enable-dvr requires the use of the vxlan '
                     'overlay network for OpenStack Juno')
                 return False
-        if get_l3ha():
+        if get_l3ha() and CompareOpenStackReleases(release) < 'newton':
             log('Disabling DVR, enable-l3ha must be disabled with dvr')
             return False
         if not get_l2population():
             log('Disabling DVR, l2-population must be enabled to use dvr')
             return False
         return True
+    else:
+        return False
+
+
+def get_dns_domain():
+    if not config('enable-ml2-dns'):
+        log('ML2 DNS Extensions are not enabled.', DEBUG)
+        return ""
+
+    dns_domain = config('dns-domain')
+    if not dns_domain:
+        log('No dns-domain has been configured', DEBUG)
+        return dns_domain
+
+    release = os_release('neutron-server')
+    if CompareOpenStackReleases(release) < 'mitaka':
+        log('Internal DNS resolution is not supported before Mitaka')
+        return ""
+
+    # Strip any trailing . at the end
+    if dns_domain[-1] == '.':
+        dns_domain = dns_domain[:-1]
+
+    # Ensure that the dns name is only a valid name. Valid entries include
+    # a-z, A-Z, 0-9, ., and -. No particular name may be longer than 63
+    # characters, each part cannot begin/end with a -. Validate this here in
+    # order to prevent other chaos which may prevent neutron services from
+    # functioning properly.
+    # Note: intentionally not validating the length of the domain name because
+    # this is practically difficult to validate reasonably well.
+    for level in dns_domain.split('.'):
+        if not DOMAIN_NAME_REGEX.match(level):
+            msg = "dns-domain '%s' is an invalid domain name." % dns_domain
+            log(msg, ERROR)
+            raise ValueError(msg)
+
+    # Make sure it ends with a .
+    dns_domain += '.'
+
+    return dns_domain
+
+
+def get_ml2_mechanism_drivers():
+    """Build comma delimited list of mechanism drivers for use in Neutron
+       ml2_conf.ini. Which drivers to enable are deduced from OpenStack
+       release and charm configuration options.
+    """
+    mechanism_drivers = [
+        'openvswitch',
+    ]
+
+    cmp_release = CompareOpenStackReleases(os_release('neutron-server'))
+    if (cmp_release == 'kilo' or cmp_release >= 'mitaka'):
+        mechanism_drivers.append('hyperv')
+
+    if get_l2population():
+        mechanism_drivers.append('l2population')
+
+    if (config('enable-sriov') and cmp_release >= 'kilo'):
+        mechanism_drivers.append('sriovnicswitch')
+    return ','.join(mechanism_drivers)
+
+
+def is_qos_requested_and_valid():
+    """Check whether QoS should be enabled by checking whether it has been
+       requested and, if it has, is it supported in the current configuration
+    """
+
+    if config('enable-qos'):
+        if CompareOpenStackReleases(os_release('neutron-server')) < 'mitaka':
+            msg = ("The enable-qos option is only supported on mitaka or "
+                   "later")
+            log(msg, ERROR)
+            return False
+        else:
+            return True
     else:
         return False
 
@@ -229,25 +330,32 @@ class NeutronCCContext(context.NeutronContext):
         ctxt['enable_dvr'] = self.neutron_dvr
         ctxt['l3_ha'] = self.neutron_l3ha
         if self.neutron_l3ha:
-            ctxt['max_l3_agents_per_router'] = \
-                config('max-l3-agents-per-router')
-            ctxt['min_l3_agents_per_router'] = \
-                config('min-l3-agents-per-router')
+            max_agents = config('max-l3-agents-per-router')
+            min_agents = config('min-l3-agents-per-router')
+            if max_agents < min_agents:
+                raise ValueError("max-l3-agents-per-router ({}) must be >= "
+                                 "min-l3-agents-per-router "
+                                 "({})".format(max_agents, min_agents))
+
+            ctxt['max_l3_agents_per_router'] = max_agents
+            ctxt['min_l3_agents_per_router'] = min_agents
+
         ctxt['dhcp_agents_per_network'] = config('dhcp-agents-per-network')
         ctxt['tenant_network_types'] = self.neutron_tenant_network_types
         ctxt['overlay_network_type'] = self.neutron_overlay_network_type
         ctxt['external_network'] = config('neutron-external-network')
         release = os_release('neutron-server')
+        cmp_release = CompareOpenStackReleases(release)
         if config('neutron-plugin') in ['vsp']:
             _config = config()
-            for k, v in _config.iteritems():
+            for k, v in _config.items():
                 if k.startswith('vsd'):
                     ctxt[k.replace('-', '_')] = v
             for rid in relation_ids('vsd-rest-api'):
                 for unit in related_units(rid):
                     rdata = relation_get(rid=rid, unit=unit)
                     vsd_ip = rdata.get('vsd-ip-address')
-                    if release >= 'kilo':
+                    if cmp_release >= 'kilo':
                         cms_id_value = rdata.get('nuage-cms-id')
                         log('relation data:cms_id required for'
                             ' nuage plugin: {}'.format(cms_id_value))
@@ -292,21 +400,93 @@ class NeutronCCContext(context.NeutronContext):
         if vni_ranges:
             ctxt['vni_ranges'] = ','.join(vni_ranges.split())
 
-        ctxt['enable_ml2_port_security'] = config('enable-ml2-port-security')
+        enable_dns_extension_driver = False
+
+        dns_domain = get_dns_domain()
+        if dns_domain:
+            enable_dns_extension_driver = True
+            ctxt['dns_domain'] = dns_domain
+
+        if cmp_release >= 'mitaka':
+            for rid in relation_ids('external-dns'):
+                if related_units(rid):
+                    enable_dns_extension_driver = True
+
+        extension_drivers = []
+        if config('enable-ml2-port-security'):
+            extension_drivers.append(EXTENSION_DRIVER_PORT_SECURITY)
+        if enable_dns_extension_driver:
+            extension_drivers.append(EXTENSION_DRIVER_DNS)
+        if is_qos_requested_and_valid():
+            extension_drivers.append(EXTENSION_DRIVER_QOS)
+
+        if extension_drivers:
+            ctxt['extension_drivers'] = ','.join(extension_drivers)
+
         ctxt['enable_sriov'] = config('enable-sriov')
 
-        if release == 'kilo' or release >= 'mitaka':
-            ctxt['enable_hyperv'] = True
-        else:
-            ctxt['enable_hyperv'] = False
-
-        if release >= 'mitaka':
+        if cmp_release >= 'mitaka':
             if config('global-physnet-mtu'):
                 ctxt['global_physnet_mtu'] = config('global-physnet-mtu')
                 if config('path-mtu'):
                     ctxt['path_mtu'] = config('path-mtu')
                 else:
                     ctxt['path_mtu'] = config('global-physnet-mtu')
+                physical_network_mtus = config('physical-network-mtus')
+                if physical_network_mtus:
+                    ctxt['physical_network_mtus'] = ','.join(
+                        physical_network_mtus.split())
+
+        if 'kilo' <= cmp_release <= 'mitaka':
+            pci_vendor_devs = config('supported-pci-vendor-devs')
+            if pci_vendor_devs:
+                ctxt['supported_pci_vendor_devs'] = \
+                    ','.join(pci_vendor_devs.split())
+
+        ctxt['mechanism_drivers'] = get_ml2_mechanism_drivers()
+
+        if config('neutron-plugin') in ['ovs', 'ml2', 'Calico']:
+            ctxt['service_plugins'] = []
+            service_plugins = {
+                'icehouse': [
+                    ('neutron.services.l3_router.l3_router_plugin.'
+                     'L3RouterPlugin'),
+                    'neutron.services.firewall.fwaas_plugin.FirewallPlugin',
+                    'neutron.services.loadbalancer.plugin.LoadBalancerPlugin',
+                    'neutron.services.vpn.plugin.VPNDriverPlugin',
+                    ('neutron.services.metering.metering_plugin.'
+                     'MeteringPlugin')],
+                'juno': [
+                    ('neutron.services.l3_router.l3_router_plugin.'
+                     'L3RouterPlugin'),
+                    'neutron.services.firewall.fwaas_plugin.FirewallPlugin',
+                    'neutron.services.loadbalancer.plugin.LoadBalancerPlugin',
+                    'neutron.services.vpn.plugin.VPNDriverPlugin',
+                    ('neutron.services.metering.metering_plugin.'
+                     'MeteringPlugin')],
+                'kilo': ['router', 'firewall', 'lbaas', 'vpnaas', 'metering'],
+                'liberty': ['router', 'firewall', 'lbaas', 'vpnaas',
+                            'metering'],
+                'mitaka': ['router', 'firewall', 'lbaas', 'vpnaas',
+                           'metering'],
+                'newton': ['router', 'firewall', 'vpnaas', 'metering',
+                           ('neutron_lbaas.services.loadbalancer.plugin.'
+                            'LoadBalancerPluginv2')],
+                'ocata': ['router', 'firewall', 'vpnaas', 'metering',
+                          ('neutron_lbaas.services.loadbalancer.plugin.'
+                           'LoadBalancerPluginv2'), 'segments'],
+                'pike': ['router', 'firewall', 'metering', 'segments',
+                         ('neutron_lbaas.services.loadbalancer.plugin.'
+                          'LoadBalancerPluginv2'),
+                         ('neutron_dynamic_routing.'
+                          'services.bgp.bgp_plugin.BgpPlugin')],
+            }
+            ctxt['service_plugins'] = service_plugins.get(
+                release, service_plugins['pike'])
+
+            if is_qos_requested_and_valid():
+                ctxt['service_plugins'].append('qos')
+            ctxt['service_plugins'] = ','.join(ctxt['service_plugins'])
 
         if config('neutron-plugin') == 'aci':
             identity_context = IdentityServiceContext(service='neutron',
@@ -439,7 +619,88 @@ class NeutronApiSDNConfigFileContext(context.OSContextGenerator):
         return {'config': '/etc/neutron/plugins/ml2/ml2_conf.ini'}
 
 
+class NeutronApiApiPasteContext(context.OSContextGenerator):
+    interfaces = ['neutron-plugin-api-subordinate']
+
+    def __validate_middleware(self, middleware):
+        '''
+        Accepts a list of dicts of the following format:
+            {
+                'type': 'middleware_type',
+                'name': 'middleware_name',
+                'config': {
+                    option_1: value_1,
+                    # ...
+                    option_n: value_n
+                }
+        This validator was meant to be minimalistic - PasteDeploy's
+        validator will take care of the rest while our purpose here
+        is mainly config rendering - not imposing additional validation
+        logic which does not belong here.
+        '''
+        # types taken from PasteDeploy's wsgi loader
+        VALID_TYPES = ['filter', 'filter-app',
+                       'app', 'application',
+                       'composite', 'composit', 'pipeline']
+
+        def types_valid(t, n, c):
+            return all((type(t) is str,
+                       type(n) is str,
+                       type(c is dict)))
+
+        def mtype_valid(t):
+            return t in VALID_TYPES
+
+        for m in middleware:
+            t, n, c = [m.get(v) for v in ['type', 'name', 'config']]
+            # note that dict has to be non-empty
+            if not types_valid(t, n, c):
+                    raise ValueError('Extra middleware key type(s) are'
+                                     ' invalid: {}'.format(repr(m)))
+            if not mtype_valid(t):
+                    raise ValueError('Extra middleware type key is not'
+                                     ' a valid PasteDeploy middleware '
+                                     'type {}'.format(repr(t)))
+            if not c:
+                raise ValueError('Extra middleware config dictionary'
+                                 ' is empty')
+
+    def __process_unit(self, rid, unit):
+        rdata = relation_get(rid=rid, unit=unit)
+        # update extra middleware for all possible plugins
+        rdata_middleware = rdata.get('extra_middleware')
+        if rdata_middleware:
+            try:
+                middleware = ast.literal_eval(rdata_middleware)
+            except:
+                import traceback
+                log(traceback.format_exc())
+                raise ValueError('Invalid extra middleware data'
+                                 ' - check the subordinate charm')
+            if middleware:
+                return middleware
+            else:
+                log('extra_middleware specified but not'
+                    'populated by unit {}, '
+                    'relation: {}, value: {}'.format(
+                        unit, rid, repr(middleware)))
+                raise ValueError('Invalid extra middleware'
+                                 'specified by a subordinate')
+        # no extra middleware
+        return list()
+
+    def __call__(self):
+        extra_middleware = []
+        for rid in relation_ids('neutron-plugin-api-subordinate'):
+            for unit in related_units(rid):
+                extra_middleware.extend(self.__process_unit(rid, unit))
+        self.__validate_middleware(extra_middleware)
+        return {'extra_middleware': extra_middleware}\
+            if extra_middleware else {}
+
+
 class MidonetContext(context.OSContextGenerator):
+
     def __init__(self, rel_name='midonet'):
         self.rel_name = rel_name
         self.interfaces = [rel_name]
@@ -474,3 +735,35 @@ class CiscoAciContext(context.OSContextGenerator):
                         return ctxt
         return {}
 
+class NeutronAMQPContext(context.AMQPContext):
+    '''AMQP context with Neutron API sauce'''
+
+    def __init__(self):
+        super(NeutronAMQPContext, self).__init__(ssl_dir=ETC_NEUTRON)
+
+    def __call__(self):
+        context = super(NeutronAMQPContext, self).__call__()
+        context['notification_topics'] = ','.join(NOTIFICATION_TOPICS)
+        return context
+
+
+class DesignateContext(context.OSContextGenerator):
+    interfaces = ['external-dns']
+
+    def __call__(self):
+        ctxt = {}
+        for rid in relation_ids('external-dns'):
+            if related_units(rid):
+                for unit in related_units(rid):
+                    rdata = relation_get(rid=rid, unit=unit)
+                    ctxt['designate_endpoint'] = rdata.get('endpoint')
+        if ctxt.get('designate_endpoint') is not None:
+            ctxt['enable_designate'] = True
+            allow_reverse_dns_lookup = config('reverse-dns-lookup')
+            ctxt['allow_reverse_dns_lookup'] = allow_reverse_dns_lookup
+            if allow_reverse_dns_lookup:
+                ctxt['ipv4_ptr_zone_prefix_size'] = (
+                    config('ipv4-ptr-zone-prefix-size'))
+                ctxt['ipv6_ptr_zone_prefix_size'] = (
+                    config('ipv6-ptr-zone-prefix-size'))
+        return ctxt

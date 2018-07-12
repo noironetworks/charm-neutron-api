@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import io
 import os
 import logging
 import unittest
@@ -54,7 +55,7 @@ def get_default_config():
     '''
     default_config = {}
     config = load_config()
-    for k, v in config.iteritems():
+    for k, v in config.items():
         if 'default' in v:
             default_config[k] = v['default']
         else:
@@ -128,12 +129,12 @@ def patch_open():
 
     Yields the mock for "open" and "file", respectively.'''
     mock_open = MagicMock(spec=open)
-    mock_file = MagicMock(spec=file)
+    mock_file = MagicMock(spec=io.FileIO)
 
     @contextmanager
     def stub_open(*args, **kwargs):
         mock_open(*args, **kwargs)
         yield mock_file
 
-    with patch('__builtin__.open', stub_open):
+    with patch('builtins.open', stub_open):
         yield mock_open, mock_file

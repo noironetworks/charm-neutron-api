@@ -34,7 +34,7 @@ import six
 
 from contextlib import contextmanager
 from collections import OrderedDict
-from .hookenv import log
+from .hookenv import log, DEBUG, local_unit
 from .fstab import Fstab
 from charmhelpers.osplatform import get_platform
 
@@ -45,6 +45,7 @@ if __platform__ == "ubuntu":
         add_new_group,
         lsb_release,
         cmp_pkgrevno,
+        CompareHostReleases,
     )  # flake8: noqa -- ignore F401 for this import
 elif __platform__ == "centos":
     from charmhelpers.core.host_factory.centos import (
@@ -52,6 +53,7 @@ elif __platform__ == "centos":
         add_new_group,
         lsb_release,
         cmp_pkgrevno,
+        CompareHostReleases,
     )  # flake8: noqa -- ignore F401 for this import
 
 UPDATEDB_PATH = '/etc/updatedb.conf'
@@ -190,6 +192,7 @@ def service_pause(service_name, init_dir="/etc/init", initd_dir="/etc/init.d",
     sysv_file = os.path.join(initd_dir, service_name)
     if init_is_systemd():
         service('disable', service_name)
+        service('mask', service_name)
     elif os.path.exists(upstart_file):
         override_path = os.path.join(
             init_dir, '{}.override'.format(service_name))
@@ -222,6 +225,7 @@ def service_resume(service_name, init_dir="/etc/init",
     upstart_file = os.path.join(init_dir, "{}.conf".format(service_name))
     sysv_file = os.path.join(initd_dir, service_name)
     if init_is_systemd():
+        service('unmask', service_name)
         service('enable', service_name)
     elif os.path.exists(upstart_file):
         override_path = os.path.join(
@@ -306,6 +310,8 @@ SYSTEMD_SYSTEM = '/run/systemd/system'
 
 def init_is_systemd():
     """Return True if the host system uses systemd, False otherwise."""
+    if lsb_release()['DISTRIB_CODENAME'] == 'trusty':
+        return False
     return os.path.isdir(SYSTEMD_SYSTEM)
 
 
@@ -435,6 +441,49 @@ def add_user_to_group(username, group):
     subprocess.check_call(cmd)
 
 
+def chage(username, lastday=None, expiredate=None, inactive=None,
+           mindays=None, maxdays=None, root=None, warndays=None):
+    """Change user password expiry information
+
+    :param str username: User to update
+    :param str lastday: Set when password was changed in YYYY-MM-DD format
+    :param str expiredate: Set when user's account will no longer be
+                           accessible in YYYY-MM-DD format.
+                           -1 will remove an account expiration date.
+    :param str inactive: Set the number of days of inactivity after a password
+                         has expired before the account is locked.
+                         -1 will remove an account's inactivity.
+    :param str mindays: Set the minimum number of days between password
+                        changes to MIN_DAYS.
+                        0 indicates the password can be changed anytime.
+    :param str maxdays: Set the maximum number of days during which a
+                        password is valid.
+                        -1 as MAX_DAYS will remove checking maxdays
+    :param str root: Apply changes in the CHROOT_DIR directory
+    :param str warndays: Set the number of days of warning before a password
+                         change is required
+    :raises subprocess.CalledProcessError: if call to chage fails
+    """
+    cmd = ['chage']
+    if root:
+        cmd.extend(['--root', root])
+    if lastday:
+        cmd.extend(['--lastday', lastday])
+    if expiredate:
+        cmd.extend(['--expiredate', expiredate])
+    if inactive:
+        cmd.extend(['--inactive', inactive])
+    if mindays:
+        cmd.extend(['--mindays', mindays])
+    if maxdays:
+        cmd.extend(['--maxdays', maxdays])
+    if warndays:
+        cmd.extend(['--warndays', warndays])
+    cmd.append(username)
+    subprocess.check_call(cmd)
+
+remove_password_expiry = functools.partial(chage, expiredate='-1', inactive='-1', mindays='0', maxdays='-1')
+
 def rsync(from_path, to_path, flags='-r', options=None, timeout=None):
     """Replicate the contents of a path"""
     options = options or ['--delete', '--executability']
@@ -481,13 +530,39 @@ def mkdir(path, owner='root', group='root', perms=0o555, force=False):
 
 def write_file(path, content, owner='root', group='root', perms=0o444):
     """Create or overwrite a file with the contents of a byte string."""
-    log("Writing file {} {}:{} {:o}".format(path, owner, group, perms))
     uid = pwd.getpwnam(owner).pw_uid
     gid = grp.getgrnam(group).gr_gid
-    with open(path, 'wb') as target:
-        os.fchown(target.fileno(), uid, gid)
-        os.fchmod(target.fileno(), perms)
-        target.write(content)
+    # lets see if we can grab the file and compare the context, to avoid doing
+    # a write.
+    existing_content = None
+    existing_uid, existing_gid = None, None
+    try:
+        with open(path, 'rb') as target:
+            existing_content = target.read()
+        stat = os.stat(path)
+        existing_uid, existing_gid = stat.st_uid, stat.st_gid
+    except:
+        pass
+    if content != existing_content:
+        log("Writing file {} {}:{} {:o}".format(path, owner, group, perms),
+            level=DEBUG)
+        with open(path, 'wb') as target:
+            os.fchown(target.fileno(), uid, gid)
+            os.fchmod(target.fileno(), perms)
+            if six.PY3 and isinstance(content, six.string_types):
+                content = content.encode('UTF-8')
+            target.write(content)
+        return
+    # the contents were the same, but we might still need to change the
+    # ownership.
+    if existing_uid != uid:
+        log("Changing uid on already existing content: {} -> {}"
+            .format(existing_uid, uid), level=DEBUG)
+        os.chown(path, uid, -1)
+    if existing_gid != gid:
+        log("Changing gid on already existing content: {} -> {}"
+            .format(existing_gid, gid), level=DEBUG)
+        os.chown(path, -1, gid)
 
 
 def fstab_remove(mp):
@@ -916,3 +991,38 @@ def updatedb(updatedb_text, new_path):
                 lines[i] = 'PRUNEPATHS="{}"'.format(' '.join(paths))
     output = "\n".join(lines)
     return output
+
+
+def modulo_distribution(modulo=3, wait=30, non_zero_wait=False):
+    """ Modulo distribution
+
+    This helper uses the unit number, a modulo value and a constant wait time
+    to produce a calculated wait time distribution. This is useful in large
+    scale deployments to distribute load during an expensive operation such as
+    service restarts.
+
+    If you have 1000 nodes that need to restart 100 at a time 1 minute at a
+    time:
+
+      time.wait(modulo_distribution(modulo=100, wait=60))
+      restart()
+
+    If you need restarts to happen serially set modulo to the exact number of
+    nodes and set a high constant wait time:
+
+      time.wait(modulo_distribution(modulo=10, wait=120))
+      restart()
+
+    @param modulo: int The modulo number creates the group distribution
+    @param wait: int The constant time wait value
+    @param non_zero_wait: boolean Override unit % modulo == 0,
+                          return modulo * wait. Used to avoid collisions with
+                          leader nodes which are often given priority.
+    @return: int Calculated time to wait for unit operation
+    """
+    unit_number = int(local_unit().split('/')[1])
+    calculated_wait_time = (unit_number % modulo) * wait
+    if non_zero_wait and calculated_wait_time == 0:
+        return modulo * wait
+    else:
+        return calculated_wait_time

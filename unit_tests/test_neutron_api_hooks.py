@@ -14,7 +14,7 @@
 
 import sys
 
-import yaml
+import json
 
 from mock import MagicMock, patch, call
 from test_utils import CharmTestCase
@@ -60,35 +60,34 @@ TO_PATCH = [
     'l3ha_router_present',
     'execd_preinstall',
     'filter_installed_packages',
+    'get_dns_domain',
     'get_dvr',
     'get_l3ha',
     'get_l2population',
     'get_overlay_network_type',
-    'git_install',
+    'is_clustered',
     'is_elected_leader',
-    'is_relation_made',
+    'is_qos_requested_and_valid',
     'log',
     'migrate_neutron_database',
     'neutron_ready',
     'open_port',
     'openstack_upgrade_available',
     'os_release',
-    'os_requires_version',
     'relation_get',
     'relation_ids',
     'relation_set',
-    'service_restart',
+    'related_units',
     'unit_get',
     'get_iface_for_address',
     'get_netmask_for_address',
-    'get_address_in_network',
     'update_nrpe_config',
     'service_reload',
     'neutron_plugin_attribute',
     'IdentityServiceContext',
     'force_etcd_restart',
     'status_set',
-    'network_get_primary_address',
+    'get_relation_ip',
     'update_dns_ha_resource_params',
 ]
 NEUTRON_CONF_DIR = "/etc/neutron"
@@ -133,7 +132,6 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.test_config.set('openstack-origin', 'distro')
         self.test_config.set('neutron-plugin', 'ovs')
         self.neutron_plugin_attribute.side_effect = _mock_nuage_npa
-        self.network_get_primary_address.side_effect = NotImplementedError
 
     def _fake_relids(self, rel_name):
         return [randrange(100) for _count in range(2)]
@@ -142,15 +140,13 @@ class NeutronAPIHooksTests(CharmTestCase):
         hooks.hooks.execute([
             'hooks/{}'.format(hookname)])
 
-    @patch.object(utils, 'git_install_requested')
-    def test_install_hook(self, git_requested):
-        git_requested.return_value = False
+    def test_install_hook(self):
         _pkgs = ['foo', 'bar']
         _ports = [80, 81, 82]
         _port_calls = [call(port) for port in _ports]
         self.determine_packages.return_value = _pkgs
         self.determine_ports.return_value = _ports
-        self._call_hook('install.real')
+        self._call_hook('install')
         self.configure_installation_source.assert_called_with(
             'distro'
         )
@@ -161,9 +157,7 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.open_port.assert_has_calls(_port_calls)
         self.assertTrue(self.execd_preinstall.called)
 
-    @patch.object(utils, 'git_install_requested')
-    def test_nuage_install_hook(self, git_requested):
-        git_requested.return_value = False
+    def test_nuage_install_hook(self):
         self.test_config.set('neutron-plugin', 'vsp')
         self.test_config.set('extra-source',
                              "deb http://10.14.4.1/nuage trusty main")
@@ -173,7 +167,7 @@ class NeutronAPIHooksTests(CharmTestCase):
         _port_calls = [call(port) for port in _ports]
         self.determine_packages.return_value = _pkgs
         self.determine_ports.return_value = _ports
-        self._call_hook('install.real')
+        self._call_hook('install')
         self.configure_installation_source.assert_called_with(
             'distro'
         )
@@ -184,45 +178,8 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.open_port.assert_has_calls(_port_calls)
         self.assertTrue(self.execd_preinstall.called)
 
-    @patch.object(utils, 'get_os_codename_install_source')
-    @patch.object(utils, 'git_install_requested')
-    def test_install_hook_git(self, git_requested, codename):
-        git_requested.return_value = True
-        _pkgs = ['foo', 'bar']
-        _ports = [80, 81, 82]
-        _port_calls = [call(port) for port in _ports]
-        self.determine_packages.return_value = _pkgs
-        self.determine_ports.return_value = _ports
-        openstack_origin_git = {
-            'repositories': [
-                {'name': 'requirements',
-                 'repository': 'git://git.openstack.org/openstack/requirements',  # noqa
-                 'branch': 'stable/juno'},
-                {'name': 'neutron',
-                 'repository': 'git://git.openstack.org/openstack/neutron',
-                 'branch': 'stable/juno'}
-            ],
-            'directory': '/mnt/openstack-git',
-        }
-        repo = "cloud:trusty-juno"
-        projects_yaml = yaml.dump(openstack_origin_git)
-        self.test_config.set('openstack-origin', repo)
-        self.test_config.set('openstack-origin-git', projects_yaml)
-        codename.return_value = 'juno'
-        self._call_hook('install.real')
-        self.assertTrue(self.execd_preinstall.called)
-        self.configure_installation_source.assert_called_with(repo)
-        self.apt_update.assert_called_with(fatal=True)
-        self.apt_install.assert_has_calls([
-            call(_pkgs, fatal=True),
-        ])
-        self.git_install.assert_called_with(projects_yaml)
-        self.open_port.assert_has_calls(_port_calls)
-
     @patch.object(hooks, 'configure_https')
-    @patch.object(hooks, 'git_install_requested')
-    def test_config_changed(self, git_requested, conf_https):
-        git_requested.return_value = False
+    def test_config_changed(self, conf_https):
         self.neutron_ready.return_value = True
         self.openstack_upgrade_available.return_value = True
         self.dvr_router_present.return_value = False
@@ -234,14 +191,14 @@ class NeutronAPIHooksTests(CharmTestCase):
         _amqp_rel_joined = self.patch('amqp_joined')
         _id_rel_joined = self.patch('identity_joined')
         _id_cluster_joined = self.patch('cluster_joined')
-        _zmq_joined = self.patch('zeromq_configuration_relation_joined')
+        _id_ha_joined = self.patch('ha_joined')
         self._call_hook('config-changed')
         self.assertTrue(_n_api_rel_joined.called)
         self.assertTrue(_n_plugin_api_rel_joined.called)
         self.assertTrue(_amqp_rel_joined.called)
         self.assertTrue(_id_rel_joined.called)
         self.assertTrue(_id_cluster_joined.called)
-        self.assertTrue(_zmq_joined.called)
+        self.assertTrue(_id_ha_joined.called)
         self.assertTrue(self.CONFIGS.write_all.called)
         self.assertTrue(self.do_openstack_upgrade.called)
         self.assertTrue(self.apt_install.called)
@@ -250,75 +207,18 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.neutron_ready.return_value = True
         self.dvr_router_present.return_value = True
         self.get_dvr.return_value = False
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             self._call_hook('config-changed')
-        self.assertEqual(context.exception.message,
-                         'Cannot disable dvr while dvr enabled routers exist.'
-                         ' Please remove any distributed routers')
 
     def test_config_changed_nol3ha_harouters(self):
         self.neutron_ready.return_value = True
         self.dvr_router_present.return_value = False
         self.l3ha_router_present.return_value = True
         self.get_l3ha.return_value = False
-        with self.assertRaises(Exception) as context:
+        with self.assertRaises(Exception):
             self._call_hook('config-changed')
-        self.assertEqual(context.exception.message,
-                         'Cannot disable Router HA while ha enabled routers'
-                         ' exist. Please remove any ha routers')
 
-    @patch.object(utils, 'get_os_codename_install_source')
-    @patch.object(hooks, 'configure_https')
-    @patch.object(hooks, 'git_install_requested')
-    @patch.object(hooks, 'config_value_changed')
-    def test_config_changed_git(self, config_val_changed, git_requested,
-                                configure_https, codename):
-        git_requested.return_value = True
-        self.neutron_ready.return_value = True
-        self.dvr_router_present.return_value = False
-        self.l3ha_router_present.return_value = False
-        self.relation_ids.side_effect = self._fake_relids
-        _n_api_rel_joined = self.patch('neutron_api_relation_joined')
-        _n_plugin_api_rel_joined =\
-            self.patch('neutron_plugin_api_relation_joined')
-        _amqp_rel_joined = self.patch('amqp_joined')
-        _id_rel_joined = self.patch('identity_joined')
-        _id_cluster_joined = self.patch('cluster_joined')
-        _zmq_joined = self.patch('zeromq_configuration_relation_joined')
-        repo = 'cloud:trusty-juno'
-        openstack_origin_git = {
-            'repositories': [
-                {'name': 'requirements',
-                 'repository':
-                 'git://git.openstack.org/openstack/requirements',
-                 'branch': 'stable/juno'},
-                {'name': 'neutron',
-                 'repository': 'git://git.openstack.org/openstack/neutron',
-                 'branch': 'stable/juno'}
-            ],
-            'directory': '/mnt/openstack-git',
-        }
-        projects_yaml = yaml.dump(openstack_origin_git)
-        self.test_config.set('openstack-origin', repo)
-        self.test_config.set('openstack-origin-git', projects_yaml)
-        codename.return_value = 'juno'
-        self._call_hook('config-changed')
-        self.git_install.assert_called_with(projects_yaml)
-        self.assertFalse(self.do_openstack_upgrade.called)
-        self.assertTrue(self.apt_install.called)
-        self.assertTrue(configure_https.called)
-        self.assertTrue(self.update_nrpe_config.called)
-        self.assertTrue(self.CONFIGS.write_all.called)
-        self.assertTrue(_n_api_rel_joined.called)
-        self.assertTrue(_n_plugin_api_rel_joined.called)
-        self.assertTrue(_amqp_rel_joined.called)
-        self.assertTrue(_id_rel_joined.called)
-        self.assertTrue(_zmq_joined.called)
-        self.assertTrue(_id_cluster_joined.called)
-
-    @patch.object(hooks, 'git_install_requested')
-    def test_config_changed_with_openstack_upgrade_action(self, git_requested):
-        git_requested.return_value = False
+    def test_config_changed_with_openstack_upgrade_action(self):
         self.openstack_upgrade_available.return_value = True
         self.test_config.set('action-managed-upgrade', True)
 
@@ -349,19 +249,16 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.assertTrue(self.CONFIGS.write.called_with(NEUTRON_CONF))
 
     def test_db_joined(self):
-        self.is_relation_made.return_value = False
-        self.unit_get.return_value = 'myhostname'
+        self.get_relation_ip.return_value = '10.0.0.1'
         self._call_hook('shared-db-relation-joined')
         self.relation_set.assert_called_with(
             username='neutron',
             database='neutron',
-            hostname='myhostname',
+            hostname='10.0.0.1',
         )
 
     def test_db_joined_spaces(self):
-        self.network_get_primary_address.side_effect = None
-        self.network_get_primary_address.return_value = '192.168.20.1'
-        self.is_relation_made.return_value = False
+        self.get_relation_ip.return_value = '192.168.20.1'
         self.unit_get.return_value = 'myhostname'
         self._call_hook('shared-db-relation-joined')
         self.relation_set.assert_called_with(
@@ -369,32 +266,6 @@ class NeutronAPIHooksTests(CharmTestCase):
             database='neutron',
             hostname='192.168.20.1',
         )
-
-    def test_db_joined_with_postgresql(self):
-        self.is_relation_made.return_value = True
-
-        with self.assertRaises(Exception) as context:
-            hooks.db_joined()
-        self.assertEqual(context.exception.message,
-                         'Attempting to associate a mysql database when there '
-                         'is already associated a postgresql one')
-
-    def test_postgresql_db_joined(self):
-        self.unit_get.return_value = 'myhostname'
-        self.is_relation_made.return_value = False
-        self._call_hook('pgsql-db-relation-joined')
-        self.relation_set.assert_called_with(
-            database='neutron',
-        )
-
-    def test_postgresql_joined_with_db(self):
-        self.is_relation_made.return_value = True
-
-        with self.assertRaises(Exception) as context:
-            hooks.pgsql_neutron_db_joined()
-        self.assertEqual(context.exception.message,
-                         'Attempting to associate a postgresql database when'
-                         ' there is already associated a mysql one')
 
     @patch.object(hooks, 'neutron_plugin_api_subordinate_relation_joined')
     @patch.object(hooks, 'conditional_neutron_migration')
@@ -412,17 +283,6 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.CONFIGS.complete_contexts.return_value = []
         self._call_hook('shared-db-relation-changed')
         self.assertFalse(self.CONFIGS.write_all.called)
-
-    @patch.object(hooks, 'neutron_plugin_api_subordinate_relation_joined')
-    @patch.object(hooks, 'conditional_neutron_migration')
-    def test_pgsql_db_changed(self, cond_neutron_mig, plugin_joined):
-        self.relation_ids.return_value = ['neutron-plugin-api-subordinate:1']
-        self._call_hook('pgsql-db-relation-changed')
-        self.assertTrue(self.CONFIGS.write.called)
-        cond_neutron_mig.assert_called_with()
-        self.relation_ids.assert_called_with('neutron-plugin-api-subordinate')
-        plugin_joined.assert_called_with(
-            relid='neutron-plugin-api-subordinate:1')
 
     def test_amqp_broken(self):
         self._call_hook('amqp-relation-broken')
@@ -451,6 +311,12 @@ class NeutronAPIHooksTests(CharmTestCase):
             relation_id=None,
             relation_settings=_endpoints
         )
+
+    def test_identity_joined_partial_cluster(self):
+        self.is_clustered.return_value = False
+        self.test_config.set('vip', '10.0.0.10')
+        hooks.identity_joined()
+        self.assertFalse(self.relation_set.called)
 
     @patch('charmhelpers.contrib.openstack.ip.service_name',
            lambda *args: 'neutron-api')
@@ -509,7 +375,6 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.relation_ids.side_effect = self._fake_relids
         _canonical_url.return_value = host
         self.api_port.return_value = port
-        self.is_relation_made = False
         neutron_url = '%s:%s' % (host, port)
         _relation_data = {
             'enable-sriov': False,
@@ -540,7 +405,7 @@ class NeutronAPIHooksTests(CharmTestCase):
         port = 1234
         _canonical_url.return_value = host
         self.api_port.return_value = port
-        self.is_relation_made = True
+        self.get_dns_domain.return_value = ""
         neutron_url = '%s:%s' % (host, port)
         _relation_data = {
             'enable-sriov': False,
@@ -603,7 +468,11 @@ class NeutronAPIHooksTests(CharmTestCase):
             'neutron-security-groups': False,
             'enable-dvr': False,
             'enable-l3ha': False,
+            'enable-qos': False,
             'addr': '172.18.18.18',
+            'polling-interval': 2,
+            'rpc-response-timeout': 60,
+            'report-interval': 30,
             'l2-population': False,
             'overlay-network-type': 'vxlan',
             'service_protocol': None,
@@ -618,10 +487,12 @@ class NeutronAPIHooksTests(CharmTestCase):
             'service_host': None,
             'neutron-api-ready': 'no',
         }
+        self.is_qos_requested_and_valid.return_value = False
         self.get_dvr.return_value = False
         self.get_l3ha.return_value = False
         self.get_l2population.return_value = False
         self.get_overlay_network_type.return_value = 'vxlan'
+        self.get_dns_domain.return_value = ''
         self._call_hook('neutron-plugin-api-relation-joined')
         self.relation_set.assert_called_with(
             relation_id=None,
@@ -636,7 +507,11 @@ class NeutronAPIHooksTests(CharmTestCase):
             'neutron-security-groups': False,
             'enable-dvr': True,
             'enable-l3ha': False,
+            'enable-qos': False,
             'addr': '172.18.18.18',
+            'polling-interval': 2,
+            'rpc-response-timeout': 60,
+            'report-interval': 30,
             'l2-population': True,
             'overlay-network-type': 'vxlan',
             'service_protocol': None,
@@ -651,10 +526,12 @@ class NeutronAPIHooksTests(CharmTestCase):
             'service_host': None,
             'neutron-api-ready': 'no',
         }
+        self.is_qos_requested_and_valid.return_value = False
         self.get_dvr.return_value = True
         self.get_l3ha.return_value = False
         self.get_l2population.return_value = True
         self.get_overlay_network_type.return_value = 'vxlan'
+        self.get_dns_domain.return_value = ''
         self._call_hook('neutron-plugin-api-relation-joined')
         self.relation_set.assert_called_with(
             relation_id=None,
@@ -669,7 +546,11 @@ class NeutronAPIHooksTests(CharmTestCase):
             'neutron-security-groups': False,
             'enable-dvr': False,
             'enable-l3ha': True,
+            'enable-qos': False,
             'addr': '172.18.18.18',
+            'polling-interval': 2,
+            'rpc-response-timeout': 60,
+            'report-interval': 30,
             'l2-population': False,
             'overlay-network-type': 'vxlan',
             'service_protocol': None,
@@ -684,10 +565,12 @@ class NeutronAPIHooksTests(CharmTestCase):
             'service_host': None,
             'neutron-api-ready': 'no',
         }
+        self.is_qos_requested_and_valid.return_value = False
         self.get_dvr.return_value = False
         self.get_l3ha.return_value = True
         self.get_l2population.return_value = False
         self.get_overlay_network_type.return_value = 'vxlan'
+        self.get_dns_domain.return_value = ''
         self._call_hook('neutron-plugin-api-relation-joined')
         self.relation_set.assert_called_with(
             relation_id=None,
@@ -702,7 +585,11 @@ class NeutronAPIHooksTests(CharmTestCase):
         _relation_data = {
             'neutron-security-groups': False,
             'addr': '172.18.18.18',
+            'polling-interval': 2,
+            'rpc-response-timeout': 60,
+            'report-interval': 30,
             'l2-population': False,
+            'enable-qos': False,
             'overlay-network-type': 'vxlan',
             'network-device-mtu': 1500,
             'enable-l3ha': True,
@@ -719,19 +606,63 @@ class NeutronAPIHooksTests(CharmTestCase):
             'service_host': None,
             'neutron-api-ready': 'no',
         }
+        self.is_qos_requested_and_valid.return_value = False
         self.get_dvr.return_value = True
         self.get_l3ha.return_value = True
         self.get_l2population.return_value = False
         self.get_overlay_network_type.return_value = 'vxlan'
+        self.get_dns_domain.return_value = ''
         self._call_hook('neutron-plugin-api-relation-joined')
         self.relation_set.assert_called_with(
             relation_id=None,
             **_relation_data
         )
 
-    def test_cluster_changed(self):
+    def test_neutron_plugin_api_relation_joined_dns(self):
+        self.unit_get.return_value = '172.18.18.18'
+        self.IdentityServiceContext.return_value = \
+            DummyContext(return_value={})
+        _relation_data = {
+            'neutron-security-groups': False,
+            'enable-dvr': False,
+            'enable-l3ha': False,
+            'enable-qos': False,
+            'addr': '172.18.18.18',
+            'polling-interval': 2,
+            'rpc-response-timeout': 60,
+            'report-interval': 30,
+            'l2-population': False,
+            'overlay-network-type': 'vxlan',
+            'service_protocol': None,
+            'auth_protocol': None,
+            'service_tenant': None,
+            'service_port': None,
+            'region': 'RegionOne',
+            'service_password': None,
+            'auth_port': None,
+            'auth_host': None,
+            'service_username': None,
+            'service_host': None,
+            'neutron-api-ready': 'no',
+            'dns-domain': 'openstack.example.'
+        }
+        self.is_qos_requested_and_valid.return_value = False
+        self.get_dvr.return_value = False
+        self.get_l3ha.return_value = False
+        self.get_l2population.return_value = False
+        self.get_overlay_network_type.return_value = 'vxlan'
+        self.get_dns_domain.return_value = 'openstack.example.'
+        self._call_hook('neutron-plugin-api-relation-joined')
+        self.relation_set.assert_called_with(
+            relation_id=None,
+            **_relation_data
+        )
+
+    @patch.object(hooks, 'check_local_db_actions_complete')
+    def test_cluster_changed(self, mock_check_local_db_actions_complete):
         self._call_hook('cluster-relation-changed')
         self.assertTrue(self.CONFIGS.write_all.called)
+        self.assertTrue(mock_check_local_db_actions_complete.called)
 
     @patch.object(hooks, 'get_hacluster_config')
     def test_ha_joined(self, _get_ha_config):
@@ -749,23 +680,30 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.get_netmask_for_address.return_value = '255.255.255.0'
         _relation_data = {
             'relation_id': None,
-            'init_services': {'res_neutron_haproxy': 'haproxy'},
             'corosync_bindiface': _ha_config['ha-bindiface'],
             'corosync_mcastport': _ha_config['ha-mcastport'],
-            'resources': {
+            'json_init_services': json.dumps({
+                'res_neutron_haproxy': 'haproxy'
+            }, sort_keys=True),
+            'json_resources': json.dumps({
                 'res_neutron_eth0_vip': 'ocf:heartbeat:IPaddr2',
                 'res_neutron_haproxy': 'lsb:haproxy'
-            },
-            'resource_params': {
+            }, sort_keys=True),
+            'json_resource_params': json.dumps({
                 'res_neutron_eth0_vip': vip_params,
                 'res_neutron_haproxy': 'op monitor interval="5s"'
-            },
-            'clones': {'cl_nova_haproxy': 'res_neutron_haproxy'}
+            }, sort_keys=True),
+            'json_clones': json.dumps({
+                'cl_nova_haproxy': 'res_neutron_haproxy'
+            }, sort_keys=True),
         }
         self._call_hook('ha-relation-joined')
-        self.relation_set.assert_called_with(
-            **_relation_data
-        )
+        self.relation_set.assert_has_calls([
+            call(**_relation_data),
+            call(clones=None, groups=None,
+                 init_services=None, relation_id=None,
+                 resource_params=None, resources=None),
+        ])
 
     @patch.object(hooks, 'get_hacluster_config')
     def test_ha_joined_no_bound_ip(self, _get_ha_config):
@@ -782,23 +720,30 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.get_netmask_for_address.return_value = None
         _relation_data = {
             'relation_id': None,
-            'init_services': {'res_neutron_haproxy': 'haproxy'},
+            'json_init_services': json.dumps({
+                'res_neutron_haproxy': 'haproxy'
+            }, sort_keys=True),
             'corosync_bindiface': _ha_config['ha-bindiface'],
             'corosync_mcastport': _ha_config['ha-mcastport'],
-            'resources': {
+            'json_resources': json.dumps({
                 'res_neutron_eth120_vip': 'ocf:heartbeat:IPaddr2',
                 'res_neutron_haproxy': 'lsb:haproxy'
-            },
-            'resource_params': {
+            }, sort_keys=True),
+            'json_resource_params': json.dumps({
                 'res_neutron_eth120_vip': vip_params,
                 'res_neutron_haproxy': 'op monitor interval="5s"'
-            },
-            'clones': {'cl_nova_haproxy': 'res_neutron_haproxy'}
+            }, sort_keys=True),
+            'json_clones': json.dumps({
+                'cl_nova_haproxy': 'res_neutron_haproxy'
+            }, sort_keys=True),
         }
         self._call_hook('ha-relation-joined')
-        self.relation_set.assert_called_with(
-            **_relation_data
-        )
+        self.relation_set.assert_has_calls([
+            call(**_relation_data),
+            call(clones=None, groups=None,
+                 init_services=None, relation_id=None,
+                 resource_params=None, resources=None),
+        ])
 
     @patch.object(hooks, 'get_hacluster_config')
     def test_ha_joined_with_ipv6(self, _get_ha_config):
@@ -819,23 +764,30 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.get_netmask_for_address.return_value = 'ffff.ffff.ffff.ffff'
         _relation_data = {
             'relation_id': None,
-            'init_services': {'res_neutron_haproxy': 'haproxy'},
+            'json_init_services': json.dumps({
+                'res_neutron_haproxy': 'haproxy'
+            }, sort_keys=True),
             'corosync_bindiface': _ha_config['ha-bindiface'],
             'corosync_mcastport': _ha_config['ha-mcastport'],
-            'resources': {
+            'json_resources': json.dumps({
                 'res_neutron_eth0_vip': 'ocf:heartbeat:IPv6addr',
                 'res_neutron_haproxy': 'lsb:haproxy'
-            },
-            'resource_params': {
+            }, sort_keys=True),
+            'json_resource_params': json.dumps({
                 'res_neutron_eth0_vip': vip_params,
                 'res_neutron_haproxy': 'op monitor interval="5s"'
-            },
-            'clones': {'cl_nova_haproxy': 'res_neutron_haproxy'}
+            }, sort_keys=True),
+            'json_clones': json.dumps({
+                'cl_nova_haproxy': 'res_neutron_haproxy'
+            }, sort_keys=True),
         }
         self._call_hook('ha-relation-joined')
-        self.relation_set.assert_called_with(
-            **_relation_data
-        )
+        self.relation_set.assert_has_calls([
+            call(**_relation_data),
+            call(clones=None, groups=None,
+                 init_services=None, relation_id=None,
+                 resource_params=None, resources=None),
+        ])
 
     @patch.object(hooks, 'get_hacluster_config')
     def test_ha_joined_dns_ha(self, _get_hacluster_config):
@@ -855,24 +807,36 @@ class NeutronAPIHooksTests(CharmTestCase):
             'os-internal-hostname': None,
             'os-public-hostname': 'neutron-api.maas',
         }
-        args = {
+        _relation_data = {
             'relation_id': None,
             'corosync_bindiface': 'em0',
             'corosync_mcastport': '8080',
-            'init_services': {'res_neutron_haproxy': 'haproxy'},
-            'resources': {'res_neutron_public_hostname': 'ocf:maas:dns',
-                          'res_neutron_haproxy': 'lsb:haproxy'},
-            'resource_params': {
+            'json_init_services': json.dumps({
+                'res_neutron_haproxy': 'haproxy'
+            }, sort_keys=True),
+            'json_resources': json.dumps({
+                'res_neutron_public_hostname': 'ocf:maas:dns',
+                'res_neutron_haproxy': 'lsb:haproxy'
+            }, sort_keys=True),
+            'json_resource_params': json.dumps({
                 'res_neutron_public_hostname':
                     'params fqdn="neutron-api.maas" ip_address="10.0.0.1"',
-                'res_neutron_haproxy': 'op monitor interval="5s"'},
-            'clones': {'cl_nova_haproxy': 'res_neutron_haproxy'}
+                'res_neutron_haproxy': 'op monitor interval="5s"'
+            }, sort_keys=True),
+            'json_clones': json.dumps({
+                'cl_nova_haproxy': 'res_neutron_haproxy'
+            }, sort_keys=True),
         }
         self.update_dns_ha_resource_params.side_effect = _fake_update
 
         hooks.ha_joined()
         self.assertTrue(self.update_dns_ha_resource_params.called)
-        self.relation_set.assert_called_with(**args)
+        self.relation_set.assert_has_calls([
+            call(**_relation_data),
+            call(clones=None, groups=None,
+                 init_services=None, relation_id=None,
+                 resource_params=None, resources=None),
+        ])
 
     def test_ha_changed(self):
         self.test_relation.set({
@@ -923,7 +887,6 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.os_release.return_value = 'kilo'
         hooks.conditional_neutron_migration()
         self.migrate_neutron_database.assert_called_with()
-        self.service_restart.assert_called_with('neutron-server')
 
     def test_conditional_neutron_migration_leader_icehouse(self):
         self.test_relation.set({
@@ -940,10 +903,21 @@ class NeutronAPIHooksTests(CharmTestCase):
         self.os_release.return_value = 'icehouse'
         hooks.conditional_neutron_migration()
         self.assertFalse(self.migrate_neutron_database.called)
-        self.assertFalse(self.service_restart.called)
 
     def test_etcd_peer_joined(self):
         self._call_hook('etcd-proxy-relation-joined')
         self.assertTrue(self.CONFIGS.register.called)
         self.CONFIGS.write.assert_any_call('/etc/init/etcd.conf')
         self.CONFIGS.write.assert_any_call('/etc/default/etcd')
+
+    def test_designate_peer_joined(self):
+        self.test_relation.set({
+            'endpoint': 'http://1.2.3.4:9001',
+        })
+        self.relation_ids.side_effect = self._fake_relids
+        self._call_hook('external-dns-relation-joined')
+        self.assertTrue(self.CONFIGS.write.called_with(NEUTRON_CONF))
+
+    def test_designate_peer_departed(self):
+        self._call_hook('external-dns-relation-departed')
+        self.assertTrue(self.CONFIGS.write.called_with(NEUTRON_CONF))

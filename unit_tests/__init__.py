@@ -13,6 +13,13 @@
 # limitations under the License.
 
 import sys
+import mock
+
+# python-apt is not installed as part of test-requirements but is imported by
+# some charmhelpers modules so create a fake import.
+sys.modules['apt'] = mock.MagicMock()
+sys.modules['apt_pkg'] = mock.MagicMock()
 
 sys.path.append('actions/')
 sys.path.append('hooks/')
+sys.path.append('unit_tests')

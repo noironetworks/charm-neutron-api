@@ -20,8 +20,9 @@ extra-bindings:
   internal:
 series:
   - xenial
+  - bionic
+  - artful
   - trusty
-  - yakkety
 provides:
   nrpe-external-master:
     interface: nrpe-external-master
@@ -33,8 +34,6 @@ provides:
 requires:
   shared-db:
     interface: mysql-shared
-  pgsql-db:
-    interface: pgsql
   amqp:
     interface: rabbitmq
   identity-service:
@@ -44,9 +43,6 @@ requires:
     scope: container
   vsd-rest-api:
     interface: vsd-rest-api
-  zeromq-configuration:
-    interface: zeromq-configuration
-    scope: container
   neutron-plugin-api-subordinate:
     interface: neutron-plugin-api-subordinate
     scope: container
@@ -54,6 +50,10 @@ requires:
     interface: etcd-proxy
   midonet:
     interface: midonet
+  external-dns:
+    interface: designate
+  certificates:
+    interface: tls-certificates
 peers:
   cluster:
     interface: neutron-api-ha

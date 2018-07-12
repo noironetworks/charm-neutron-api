@@ -14,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Amulet tests on a basic neutron-api deployment on xenial-newton."""
+"""Amulet tests on a basic neutron-api deployment on xenial-pike."""
 
 from basic_deployment import NeutronAPIBasicDeployment
 
 if __name__ == '__main__':
     deployment = NeutronAPIBasicDeployment(series='xenial',
-                                           openstack='cloud:xenial-newton',
-                                           source='cloud:xenial-updates/newton')
+                                           openstack='cloud:xenial-pike',
+                                           source='cloud:xenial-updates/pike')
     deployment.run_tests()

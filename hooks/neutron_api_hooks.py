@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 #
 # Copyright 2016 Canonical Ltd
 #
@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import sys
 import uuid
 from subprocess import (
@@ -24,23 +25,23 @@ from charmhelpers.core.hookenv import (
     Hooks,
     UnregisteredHookError,
     config,
-    is_relation_made,
     local_unit,
     log,
+    DEBUG,
     ERROR,
+    WARNING,
     relation_get,
     relation_ids,
     relation_set,
     status_set,
     open_port,
     unit_get,
-    network_get_primary_address,
+    related_units,
 )
 
 from charmhelpers.core.host import (
     mkdir,
     service_reload,
-    service_restart,
 )
 
 from charmhelpers.fetch import (
@@ -51,50 +52,51 @@ from charmhelpers.fetch import (
 )
 
 from charmhelpers.contrib.openstack.utils import (
-    config_value_changed,
     configure_installation_source,
-    git_install_requested,
     openstack_upgrade_available,
-    os_requires_version,
     os_release,
     sync_db_with_multi_ipv6_addresses,
     is_unit_paused_set,
     pausable_restart_on_change as restart_on_change,
+    CompareOpenStackReleases,
 )
 
 from neutron_api_utils import (
-    CLUSTER_RES,
-    NEUTRON_CONF,
+    additional_install_locations,
+    API_PASTE_INI,
     api_port,
+    assess_status,
+    CLUSTER_RES,
     determine_packages,
     determine_ports,
     do_openstack_upgrade,
-    git_install,
-    is_api_ready,
     dvr_router_present,
+    force_etcd_restart,
+    is_api_ready,
     l3ha_router_present,
     migrate_neutron_database,
+    NEUTRON_CONF,
     neutron_ready,
     register_configs,
     restart_map,
     services,
     setup_ipv6,
-    get_topics,
-    additional_install_locations,
-    force_etcd_restart,
-    assess_status,
+    check_local_db_actions_complete,
 )
 from neutron_api_context import (
+    get_dns_domain,
     get_dvr,
     get_l3ha,
     get_l2population,
     get_overlay_network_type,
     IdentityServiceContext,
+    is_qos_requested_and_valid,
     EtcdContext,
 )
 
 from charmhelpers.contrib.hahelpers.cluster import (
     get_hacluster_config,
+    is_clustered,
     is_elected_leader,
 )
 
@@ -116,9 +118,13 @@ from charmhelpers.contrib.openstack.neutron import (
 from charmhelpers.contrib.network.ip import (
     get_iface_for_address,
     get_netmask_for_address,
-    get_address_in_network,
-    get_ipv6_addr,
-    is_ipv6
+    is_ipv6,
+    get_relation_ip,
+)
+
+from charmhelpers.contrib.openstack.cert_utils import (
+    get_certificate_request,
+    process_certificates,
 )
 
 from charmhelpers.contrib.openstack.context import ADDRESS_TYPES
@@ -131,22 +137,29 @@ CONFIGS = register_configs()
 
 
 def conditional_neutron_migration():
-    if os_release('neutron-server') <= 'icehouse':
+    """Initialise neutron database if not already done so.
+
+    Runs neutron-manage to initialize a new database or migrate existing and
+    restarts services to ensure that the changes are picked up. The first
+    (leader) unit to perform this action should have broadcast this information
+    to its peers so first we check whether this has already occurred.
+    """
+    if CompareOpenStackReleases(os_release('neutron-server')) <= 'icehouse':
         log('Not running neutron database migration as migrations are handled '
             'by the neutron-server process.')
         return
-    if is_elected_leader(CLUSTER_RES):
-        allowed_units = relation_get('allowed_units')
-        if allowed_units and local_unit() in allowed_units.split():
-            migrate_neutron_database()
-            if not is_unit_paused_set():
-                service_restart('neutron-server')
-        else:
-            log('Not running neutron database migration, either no'
-                ' allowed_units or this unit is not present')
-            return
-    else:
+
+    if not is_elected_leader(CLUSTER_RES):
         log('Not running neutron database migration, not leader')
+        return
+
+    allowed_units = relation_get('allowed_units')
+    if not (allowed_units and local_unit() in allowed_units.split()):
+        log('Not running neutron database migration, either no '
+            'allowed_units or this unit is not present')
+        return
+
+    migrate_neutron_database()
 
 
 def configure_https():
@@ -173,8 +186,7 @@ def configure_https():
         identity_joined(rid=rid)
 
 
-@hooks.hook('install.real')
-@hooks.hook()
+@hooks.hook('install')
 @harden()
 def install():
     status_set('maintenance', 'Executing pre-install')
@@ -190,9 +202,6 @@ def install():
     packages = determine_packages(openstack_origin)
     apt_install(packages, fatal=True)
 
-    status_set('maintenance', 'Git install')
-    git_install(config('openstack-origin-git'))
-
     [open_port(port) for port in determine_ports()]
 
     if neutron_plugin == 'midonet':
@@ -203,7 +212,7 @@ def install():
 @hooks.hook('vsd-rest-api-relation-joined')
 @restart_on_change(restart_map(), stopstart=True)
 def relation_set_nuage_cms_name(rid=None):
-    if os_release('neutron-server') >= 'kilo':
+    if CompareOpenStackReleases(os_release('neutron-server')) >= 'kilo':
         if config('vsd-cms-name') is None:
             e = "Neutron Api hook failed as vsd-cms-name" \
                 " is not specified"
@@ -223,7 +232,7 @@ def vsd_changed(relation_id=None, remote_unit=None):
         if not vsd_ip_address:
             return
         vsd_address = '{}:8443'.format(vsd_ip_address)
-        if os_release('neutron-server') >= 'kilo':
+        if CompareOpenStackReleases(os_release('neutron-server')) >= 'kilo':
             vsd_cms_id = relation_get('nuage-cms-id')
             log("nuage-vsd-api-relation-changed : cms_id:{}"
                 .format(vsd_cms_id))
@@ -261,11 +270,7 @@ def config_changed():
                                           config('database-user'))
 
     global CONFIGS
-    if git_install_requested():
-        if config_value_changed('openstack-origin-git'):
-            status_set('maintenance', 'Running Git install')
-            git_install(config('openstack-origin-git'))
-    elif not config('action-managed-upgrade'):
+    if not config('action-managed-upgrade'):
         if openstack_upgrade_available('neutron-common'):
             status_set('maintenance', 'Running openstack upgrade')
             do_openstack_upgrade(CONFIGS)
@@ -289,8 +294,8 @@ def config_changed():
         amqp_joined(relation_id=r_id)
     for r_id in relation_ids('identity-service'):
         identity_joined(rid=r_id)
-    for rid in relation_ids('zeromq-configuration'):
-        zeromq_configuration_relation_joined(rid)
+    for r_id in relation_ids('ha'):
+        ha_joined(relation_id=r_id)
     [cluster_joined(rid) for rid in relation_ids('cluster')]
 
 
@@ -315,40 +320,22 @@ def amqp_changed():
 
 @hooks.hook('shared-db-relation-joined')
 def db_joined():
-    if is_relation_made('pgsql-db'):
-        # error, postgresql is used
-        e = ('Attempting to associate a mysql database when there is already '
-             'associated a postgresql one')
-        log(e, level=ERROR)
-        raise Exception(e)
-
     if config('prefer-ipv6'):
         sync_db_with_multi_ipv6_addresses(config('database'),
                                           config('database-user'))
     else:
-        host = None
-        try:
-            # NOTE: try to use network spaces
-            host = network_get_primary_address('shared-db')
-        except NotImplementedError:
-            # NOTE: fallback to private-address
-            host = unit_get('private-address')
+        # Avoid churn check for access-network early
+        access_network = None
+        for unit in related_units():
+            access_network = relation_get(unit=unit,
+                                          attribute='access-network')
+            if access_network:
+                break
+        host = get_relation_ip('shared-db', cidr_network=access_network)
 
         relation_set(database=config('database'),
                      username=config('database-user'),
                      hostname=host)
-
-
-@hooks.hook('pgsql-db-relation-joined')
-def pgsql_neutron_db_joined():
-    if is_relation_made('shared-db'):
-        # raise error
-        e = ('Attempting to associate a postgresql database'
-             ' when there is already associated a mysql one')
-        log(e, level=ERROR)
-        raise Exception(e)
-
-    relation_set(database=config('database'))
 
 
 @hooks.hook('shared-db-relation-changed')
@@ -364,26 +351,19 @@ def db_changed():
         neutron_plugin_api_subordinate_relation_joined(relid=r_id)
 
 
-@hooks.hook('pgsql-db-relation-changed')
-@restart_on_change(restart_map())
-def postgresql_neutron_db_changed():
-    CONFIGS.write(NEUTRON_CONF)
-    conditional_neutron_migration()
-
-    for r_id in relation_ids('neutron-plugin-api-subordinate'):
-        neutron_plugin_api_subordinate_relation_joined(relid=r_id)
-
-
 @hooks.hook('amqp-relation-broken',
             'identity-service-relation-broken',
-            'shared-db-relation-broken',
-            'pgsql-db-relation-broken')
+            'shared-db-relation-broken')
 def relation_broken():
     CONFIGS.write_all()
 
 
 @hooks.hook('identity-service-relation-joined')
 def identity_joined(rid=None, relation_trigger=False):
+    if config('vip') and not is_clustered():
+        log('Defering registration until clustered', level=DEBUG)
+        return
+
     public_url = '{}:{}'.format(canonical_url(CONFIGS, PUBLIC),
                                 api_port('neutron-server'))
     admin_url = '{}:{}'.format(canonical_url(CONFIGS, ADMIN),
@@ -473,8 +453,12 @@ def neutron_plugin_api_relation_joined(rid=None):
             'l2-population': get_l2population(),
             'enable-dvr': get_dvr(),
             'enable-l3ha': get_l3ha(),
+            'enable-qos': is_qos_requested_and_valid(),
             'overlay-network-type': get_overlay_network_type(),
             'addr': unit_get('private-address'),
+            'polling-interval': config('polling-interval'),
+            'rpc-response-timeout': config('rpc-response-timeout'),
+            'report-interval': config('report-interval'),
         }
 
         # Provide this value to relations since it needs to be set in multiple
@@ -500,6 +484,10 @@ def neutron_plugin_api_relation_joined(rid=None):
         'region': config('region'),
     })
 
+    dns_domain = get_dns_domain()
+    if dns_domain:
+        relation_data['dns-domain'] = dns_domain
+
     if is_api_ready(CONFIGS):
         relation_data['neutron-api-ready'] = "yes"
     else:
@@ -510,19 +498,21 @@ def neutron_plugin_api_relation_joined(rid=None):
 
 @hooks.hook('cluster-relation-joined')
 def cluster_joined(relation_id=None):
+    settings = {}
+
     for addr_type in ADDRESS_TYPES:
-        address = get_address_in_network(
-            config('os-{}-network'.format(addr_type))
-        )
+        address = get_relation_ip(
+            addr_type,
+            cidr_network=config('os-{}-network'.format(addr_type)))
         if address:
-            relation_set(
-                relation_id=relation_id,
-                relation_settings={'{}-address'.format(addr_type): address}
-            )
-    if config('prefer-ipv6'):
-        private_addr = get_ipv6_addr(exc_list=[config('vip')])[0]
-        relation_set(relation_id=relation_id,
-                     relation_settings={'private-address': private_addr})
+            settings['{}-address'.format(addr_type)] = address
+
+    settings['private-address'] = get_relation_ip('cluster')
+
+    relation_set(relation_id=relation_id, relation_settings=settings)
+
+    if not relation_id:
+        check_local_db_actions_complete()
 
 
 @hooks.hook('cluster-relation-changed',
@@ -530,6 +520,7 @@ def cluster_joined(relation_id=None):
 @restart_on_change(restart_map(), stopstart=True)
 def cluster_changed():
     CONFIGS.write_all()
+    check_local_db_actions_complete()
 
 
 @hooks.hook('ha-relation-joined')
@@ -562,6 +553,14 @@ def ha_joined(relation_id=None):
 
             if iface is not None:
                 vip_key = 'res_neutron_{}_vip'.format(iface)
+                if vip_key in vip_group:
+                    if vip not in resource_params[vip_key]:
+                        vip_key = '{}_{}'.format(vip_key, vip_params)
+                    else:
+                        log("Resource '%s' (vip='%s') already exists in "
+                            "vip group - skipping" % (vip_key, vip), WARNING)
+                        continue
+
                 resources[vip_key] = res_neutron_vip
                 resource_params[vip_key] = (
                     'params {ip}="{vip}" cidr_netmask="{netmask}" '
@@ -573,7 +572,12 @@ def ha_joined(relation_id=None):
                 vip_group.append(vip_key)
 
         if len(vip_group) >= 1:
-            relation_set(groups={'grp_neutron_vips': ' '.join(vip_group)})
+            relation_set(
+                relation_id=relation_id,
+                json_groups=json.dumps({
+                    'grp_neutron_vips': ' '.join(vip_group)
+                }, sort_keys=True)
+            )
 
     init_services = {
         'res_neutron_haproxy': 'haproxy'
@@ -582,12 +586,22 @@ def ha_joined(relation_id=None):
         'cl_nova_haproxy': 'res_neutron_haproxy'
     }
     relation_set(relation_id=relation_id,
-                 init_services=init_services,
                  corosync_bindiface=cluster_config['ha-bindiface'],
                  corosync_mcastport=cluster_config['ha-mcastport'],
-                 resources=resources,
-                 resource_params=resource_params,
-                 clones=clones)
+                 json_init_services=json.dumps(init_services,
+                                               sort_keys=True),
+                 json_resources=json.dumps(resources,
+                                           sort_keys=True),
+                 json_resource_params=json.dumps(resource_params,
+                                                 sort_keys=True),
+                 json_clones=json.dumps(clones,
+                                        sort_keys=True))
+
+    # NOTE(jamespage): Clear any non-json based keys
+    relation_set(relation_id=relation_id,
+                 groups=None, init_services=None,
+                 resources=None, resource_params=None,
+                 clones=None)
 
 
 @hooks.hook('ha-relation-changed')
@@ -605,26 +619,27 @@ def ha_changed():
         neutron_api_relation_joined(rid=rid)
 
 
-@hooks.hook('zeromq-configuration-relation-joined')
-@os_requires_version('kilo', 'neutron-server')
-def zeromq_configuration_relation_joined(relid=None):
-    relation_set(relation_id=relid,
-                 topics=" ".join(get_topics()),
-                 users="neutron")
-
-
-@hooks.hook('neutron-plugin-api-subordinate-relation-joined')
+@hooks.hook('neutron-plugin-api-subordinate-relation-joined',
+            'neutron-plugin-api-subordinate-relation-changed')
+@restart_on_change(restart_map(), stopstart=True)
 def neutron_plugin_api_subordinate_relation_joined(relid=None):
+    '''
+    -changed handles relation data set by a subordinate.
+    '''
     relation_data = {'neutron-api-ready': 'no'}
     if is_api_ready(CONFIGS):
         relation_data['neutron-api-ready'] = "yes"
     relation_set(relation_id=relid, **relation_data)
 
+    # there is no race condition with the neutron service restart
+    # as juju propagates the changes done in relation_set only after
+    # the hook exists
+    CONFIGS.write(API_PASTE_INI)
 
-@hooks.hook('zeromq-configuration-relation-changed',
-            'neutron-plugin-api-subordinate-relation-changed')
+
+@hooks.hook('neutron-plugin-api-subordinate-relation-changed')
 @restart_on_change(restart_map(), stopstart=True)
-def zeromq_configuration_relation_changed():
+def neutron_plugin_api_relation_changed():
     CONFIGS.write_all()
 
 
@@ -667,11 +682,34 @@ def midonet_changed():
     CONFIGS.write_all()
 
 
+@hooks.hook('external-dns-relation-joined',
+            'external-dns-relation-changed',
+            'external-dns-relation-departed',
+            'external-dns-relation-broken')
+@restart_on_change(restart_map())
+def designate_changed():
+    CONFIGS.write_all()
+
+
 @hooks.hook('update-status')
 @harden()
 @harden()
 def update_status():
     log('Updating status.')
+
+
+@hooks.hook('certificates-relation-joined')
+def certs_joined(relation_id=None):
+    relation_set(
+        relation_id=relation_id,
+        relation_settings=get_certificate_request())
+
+
+@hooks.hook('certificates-relation-changed')
+@restart_on_change(restart_map(), stopstart=True)
+def certs_changed(relation_id=None, unit=None):
+    process_certificates('neutron', relation_id, unit)
+    configure_https()
 
 
 def main():

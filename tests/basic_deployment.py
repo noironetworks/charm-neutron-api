@@ -13,8 +13,6 @@
 # limitations under the License.
 
 import amulet
-import os
-import yaml
 
 from charmhelpers.contrib.openstack.amulet.deployment import (
     OpenStackAmuletDeployment
@@ -33,20 +31,19 @@ u = OpenStackAmuletUtils(DEBUG)
 class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
     """Amulet tests on a basic neutron-api deployment."""
 
-    def __init__(self, series, openstack=None, source=None, git=False,
+    def __init__(self, series, openstack=None, source=None,
                  stable=True):
         """Deploy the entire test environment."""
         super(NeutronAPIBasicDeployment, self).__init__(series, openstack,
                                                         source, stable)
-        self.git = git
         self._add_services()
         self._add_relations()
         self._configure_services()
         self._deploy()
 
         u.log.info('Waiting on extended status checks...')
-        exclude_services = []
-        self._auto_wait_for_status(exclude_services=exclude_services)
+        self.exclude_services = []
+        self._auto_wait_for_status(exclude_services=self.exclude_services)
 
         self.d.sentry.wait()
         self._initialize_tests()
@@ -120,56 +117,13 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
     def _configure_services(self):
         """Configure all of the services."""
         neutron_api_config = {}
-        if self.git:
-            amulet_http_proxy = os.environ.get('AMULET_HTTP_PROXY')
+        neutron_api_config['enable-sriov'] = True
+        neutron_api_config['supported-pci-vendor-devs'] = '8086:1515'
 
-            branch = 'stable/' + self._get_openstack_release_string()
-
-            if self._get_openstack_release() >= self.trusty_kilo:
-                openstack_origin_git = {
-                    'repositories': [
-                        {'name': 'requirements',
-                         'repository': 'git://github.com/openstack/requirements',  # noqa
-                         'branch': branch},
-                        {'name': 'neutron-fwaas',
-                         'repository': 'git://github.com/openstack/neutron-fwaas',  # noqa
-                         'branch': branch},
-                        {'name': 'neutron-lbaas',
-                         'repository': 'git://github.com/openstack/neutron-lbaas',  # noqa
-                         'branch': branch},
-                        {'name': 'neutron-vpnaas',
-                         'repository': 'git://github.com/openstack/neutron-vpnaas',  # noqa
-                         'branch': branch},
-                        {'name': 'neutron',
-                         'repository': 'git://github.com/openstack/neutron',
-                         'branch': branch},
-                    ],
-                    'directory': '/mnt/openstack-git',
-                    'http_proxy': amulet_http_proxy,
-                    'https_proxy': amulet_http_proxy,
-                }
-            else:
-                reqs_repo = 'git://github.com/openstack/requirements'
-                neutron_repo = 'git://github.com/openstack/neutron'
-                if self._get_openstack_release() == self.trusty_icehouse:
-                    reqs_repo = 'git://github.com/coreycb/requirements'
-                    neutron_repo = 'git://github.com/coreycb/neutron'
-
-                openstack_origin_git = {
-                    'repositories': [
-                        {'name': 'requirements',
-                         'repository': reqs_repo,
-                         'branch': branch},
-                        {'name': 'neutron',
-                         'repository': neutron_repo,
-                         'branch': branch},
-                    ],
-                    'directory': '/mnt/openstack-git',
-                    'http_proxy': amulet_http_proxy,
-                    'https_proxy': amulet_http_proxy,
-                }
-            neutron_api_config['openstack-origin-git'] = \
-                yaml.dump(openstack_origin_git)
+        if self._get_openstack_release() >= self.trusty_mitaka:
+            neutron_api_config['enable-ml2-dns'] = True
+            # openstack.example. is the default but be explicit for the test
+            neutron_api_config['dns-domain'] = 'openstack.example.'
 
         keystone_config = {'admin-password': 'openstack',
                            'admin-token': 'ubuntutesting'}
@@ -211,11 +165,17 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
            service units."""
         u.log.debug('Checking status of system services...')
         neutron_api_services = ['neutron-server']
+        nova_cc_services = ['nova-api-os-compute',
+                            'nova-cert',
+                            'nova-scheduler',
+                            'nova-conductor']
+
         if self._get_openstack_release() >= self.xenial_newton:
             neutron_services = ['neutron-dhcp-agent',
                                 'neutron-lbaasv2-agent',
                                 'neutron-metadata-agent',
                                 'neutron-openvswitch-agent']
+            nova_cc_services.remove('nova-cert')
         elif self._get_openstack_release() >= self.trusty_mitaka and \
                 self._get_openstack_release() < self.xenial_newton:
             neutron_services = ['neutron-dhcp-agent',
@@ -234,20 +194,10 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
         if self._get_openstack_release() < self.trusty_kilo:
             neutron_services.append('neutron-metering-agent')
 
-        nova_cc_services = ['nova-api-os-compute',
-                            'nova-cert',
-                            'nova-scheduler',
-                            'nova-conductor']
-
         services = {
-            self.keystone_sentry: ['keystone'],
-            self.nova_cc_sentry: nova_cc_services,
             self.neutron_gw_sentry: neutron_services,
             self.neutron_api_sentry: neutron_api_services,
         }
-
-        if self._get_openstack_release() >= self.trusty_liberty:
-            services[self.keystone_sentry] = ['apache2']
 
         ret = u.validate_services_by_name(services)
         if ret:
@@ -394,6 +344,12 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
             'service_tenant': 'services',
             'service_username': 'neutron',
         }
+
+        if self._get_openstack_release() >= self.trusty_mitaka:
+            expected.update({
+                'dns-domain': 'openstack.example.',
+            })
+
         ret = u.validate_relation_data(unit, relation, expected)
         if ret:
             message = u.relation_error(
@@ -410,6 +366,7 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
         expected = {
             'private-address': u.valid_ip,
         }
+
         ret = u.validate_relation_data(unit, relation, expected)
         if ret:
             message = u.relation_error('neutron-api neutron-plugin-api', ret)
@@ -481,6 +438,11 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
                 'connection': db_conn,
             },
         }
+
+        if self._get_openstack_release() >= self.trusty_mitaka:
+            expected['DEFAULT'].update({
+                'dns_domain': 'openstack.example.'
+            })
 
         auth_uri = '{}://{}:{}'.format(
             rel_napi_ks['service_protocol'],
@@ -572,6 +534,11 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
                 'rabbit_host': rabbitmq_relation['hostname']
             })
 
+        if self._get_openstack_release() >= self.xenial_queens:
+            domain = 'service_domain'
+            expected['keystone_authtoken']['project_domain_name'] = domain
+            expected['keystone_authtoken']['user_domain_name'] = domain
+
         for section, pairs in expected.iteritems():
             ret = u.validate_config_data(unit, conf, section, pairs)
             if ret:
@@ -607,18 +574,35 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
             },
             'securitygroup': {
                 'enable_security_group': 'False',
-            }
+            },
         }
 
-        if self._get_openstack_release() == self.trusty_liberty:
-            # Liberty
-            expected['ml2'].update({
-                'mechanism_drivers': 'openvswitch,l2population'
-            })
-        else:
-            # Earlier or later than Liberty
+        if self._get_openstack_release() < self.trusty_kilo:
+            # Pre-Kilo
             expected['ml2'].update({
                 'mechanism_drivers': 'openvswitch,hyperv,l2population'
+            })
+        elif self._get_openstack_release() == self.trusty_liberty:
+            # Liberty
+            expected['ml2'].update({
+                'mechanism_drivers': 'openvswitch,l2population,sriovnicswitch'
+            })
+        else:
+            # Juno, Kilo, Mitaka and newer
+            expected['ml2'].update({
+                'mechanism_drivers': 'openvswitch,hyperv,l2population'
+                                     ',sriovnicswitch'
+            })
+
+        if ('kilo' <= self._get_openstack_release() <= 'mitaka'):
+            # Kilo through Mitaka require supported_pci_vendor_devs set
+            expected['ml2_sriov'].update({
+                'supported_pci_vendor_devs': '8086:1515',
+            })
+
+        if self._get_openstack_release() >= self.trusty_mitaka:
+            expected['ml2'].update({
+                'extension_drivers': 'dns',
             })
 
         for section, pairs in expected.iteritems():
@@ -626,6 +610,39 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
             if ret:
                 message = "ml2 config error: {}".format(ret)
                 amulet.raise_status(amulet.FAIL, msg=message)
+
+    def test_400_enable_qos(self):
+        """Check qos settings"""
+        if self._get_openstack_release() >= self.trusty_mitaka:
+            u.log.debug('Checking QoS setting in neutron-api '
+                        'neutron-openvswitch relation data...')
+            unit = self.neutron_api_sentry
+            relation = ['neutron-plugin-api',
+                        'neutron-openvswitch:neutron-plugin-api']
+
+            set_default = {'enable-qos': 'False'}
+            set_alternate = {'enable-qos': 'True'}
+            self.d.configure('neutron-api', set_alternate)
+
+            relation_data = unit.relation(relation[0], relation[1])
+            if relation_data['enable-qos'] != 'True':
+                message = ("enable-qos setting not set properly on "
+                           "neutron-plugin-api relation")
+                amulet.raise_status(amulet.FAIL, msg=message)
+
+            qos_plugin = 'qos'
+            config = u._get_config(unit, '/etc/neutron/neutron.conf')
+            service_plugins = config.get(
+                'DEFAULT',
+                'service_plugins').split(',')
+            if qos_plugin not in service_plugins:
+                message = "{} not in service_plugins".format(qos_plugin)
+                amulet.raise_status(amulet.FAIL, msg=message)
+
+            u.log.debug('Setting QoS back to {}'.format(
+                set_default['enable-qos']))
+            self.d.configure('neutron-api', set_default)
+            u.log.debug('OK')
 
     def test_900_restart_on_config_change(self):
         """Verify that the specified services are restarted when the
@@ -646,6 +663,7 @@ class NeutronAPIBasicDeployment(OpenStackAmuletDeployment):
         u.log.debug('Making config change on {}...'.format(juju_service))
         mtime = u.get_sentry_time(sentry)
         self.d.configure(juju_service, set_alternate)
+        self._auto_wait_for_status(exclude_services=self.exclude_services)
 
         for s, conf_file in services.iteritems():
             u.log.debug("Checking that service restarted: {}".format(s))

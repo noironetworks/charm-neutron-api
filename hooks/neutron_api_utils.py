@@ -18,7 +18,9 @@ from functools import partial
 import os
 import shutil
 import subprocess
+import uuid
 import glob
+import yaml
 from base64 import b64encode
 from charmhelpers.contrib.openstack import context, templating
 from charmhelpers.contrib.openstack.neutron import (
@@ -28,13 +30,6 @@ from charmhelpers.contrib.openstack.neutron import (
 from charmhelpers.contrib.openstack.utils import (
     os_release,
     get_os_codename_install_source,
-    git_clone_and_install,
-    git_default_repos,
-    git_generate_systemd_init_files,
-    git_install_requested,
-    git_pip_venv_dir,
-    git_src_dir,
-    git_yaml_value,
     configure_installation_source,
     incomplete_relation_data,
     is_unit_paused_set,
@@ -44,17 +39,20 @@ from charmhelpers.contrib.openstack.utils import (
     os_application_version_set,
     token_cache_pkgs,
     enable_memcache,
-)
-
-from charmhelpers.contrib.python.packages import (
-    pip_install,
+    CompareOpenStackReleases,
+    reset_os_release,
 )
 
 from charmhelpers.core.hookenv import (
     charm_dir,
     config,
     log,
+    DEBUG,
     relation_ids,
+    related_units,
+    relation_get,
+    relation_set,
+    local_unit,
 )
 
 from charmhelpers.fetch import (
@@ -66,22 +64,16 @@ from charmhelpers.fetch import (
 
 from charmhelpers.core.host import (
     lsb_release,
-    adduser,
-    add_group,
-    add_user_to_group,
-    mkdir,
+    CompareHostReleases,
     service_stop,
     service_start,
     service_restart,
-    write_file,
 )
 
 from charmhelpers.contrib.hahelpers.cluster import (
     get_hacluster_config,
 )
 
-
-from charmhelpers.core.templating import render
 from charmhelpers.contrib.hahelpers.cluster import is_elected_leader
 
 import neutron_api_context
@@ -124,20 +116,6 @@ BASE_GIT_PACKAGES = [
     'zlib1g-dev',
 ]
 
-# ubuntu packages that should not be installed when deploying from git
-GIT_PACKAGE_BLACKLIST = [
-    'neutron-server',
-    'neutron-plugin-ml2',
-    'python-keystoneclient',
-    'python-six',
-]
-
-GIT_PACKAGE_BLACKLIST_KILO = [
-    'python-neutron-lbaas',
-    'python-neutron-fwaas',
-    'python-neutron-vpnaas',
-]
-
 BASE_SERVICES = [
     'neutron-server'
 ]
@@ -156,16 +134,22 @@ APACHE_24_CONF = '/etc/apache2/sites-available/openstack_https_frontend.conf'
 NEUTRON_DEFAULT = '/etc/default/neutron-server'
 CA_CERT_PATH = '/usr/local/share/ca-certificates/keystone_juju_ca_cert.crt'
 MEMCACHED_CONF = '/etc/memcached.conf'
+API_PASTE_INI = '%s/api-paste.ini' % NEUTRON_CONF_DIR
+# NOTE:(fnordahl) placeholder ml2_conf_srov.ini pointing users to ml2_conf.ini
+# Due to how neutron init scripts are laid out on various Linux
+# distributions we put the [ml2_sriov] section in ml2_conf.ini instead
+# of its default ml2_conf_sriov.ini location.
+ML2_SRIOV_INI = os.path.join(NEUTRON_CONF_DIR,
+                             'plugins/ml2/ml2_conf_sriov.ini')
 
 BASE_RESOURCE_MAP = OrderedDict([
     (NEUTRON_CONF, {
         'services': ['neutron-server'],
-        'contexts': [context.AMQPContext(ssl_dir=NEUTRON_CONF_DIR),
+        'contexts': [neutron_api_context.NeutronAMQPContext(),
                      context.SharedDBContext(
                          user=config('database-user'),
                          database=config('database'),
                          ssl_dir=NEUTRON_CONF_DIR),
-                     context.PostgresqlDBContext(database=config('database')),
                      neutron_api_context.IdentityServiceContext(
                          service='neutron',
                          service_user='neutron'),
@@ -177,11 +161,16 @@ BASE_RESOURCE_MAP = OrderedDict([
                      context.BindHostContext(),
                      context.WorkerConfigContext(),
                      context.InternalEndpointContext(),
-                     context.MemcacheContext()],
+                     context.MemcacheContext(),
+                     neutron_api_context.DesignateContext()],
     }),
     (NEUTRON_DEFAULT, {
         'services': ['neutron-server'],
         'contexts': [neutron_api_context.NeutronCCContext()],
+    }),
+    (API_PASTE_INI, {
+        'services': ['neutron-server'],
+        'contexts': [neutron_api_context.NeutronApiApiPasteContext()],
     }),
     (APACHE_CONF, {
         'contexts': [neutron_api_context.ApacheSSLContext()],
@@ -201,8 +190,8 @@ BASE_RESOURCE_MAP = OrderedDict([
 # The interface is said to be satisfied if anyone of the interfaces in the
 # list has a complete context.
 REQUIRED_INTERFACES = {
-    'database': ['shared-db', 'pgsql-db'],
-    'messaging': ['amqp', 'zeromq-configuration'],
+    'database': ['shared-db'],
+    'messaging': ['amqp'],
     'identity': ['identity-service'],
 }
 
@@ -216,6 +205,90 @@ LIBERTY_RESOURCE_MAP = OrderedDict([
         'contexts': [],
     }),
 ])
+
+
+NEUTRON_DB_INIT_RKEY = 'neutron-db-initialised'
+NEUTRON_DB_INIT_ECHO_RKEY = 'neutron-db-initialised-echo'
+
+
+def is_db_initialised(cluster_rid=None):
+    """
+    Check whether a db intialisation has been performed by any peer unit.
+
+    We base our decision on whether we or any of our peers has previously
+    sent or echoed an initialisation notification.
+
+    @param cluster_rid: current relation id. If none provided, all cluster
+                        relation ids will be checked.
+    @return: True if there has been a db initialisation otherwise False.
+    """
+    if cluster_rid:
+        rids = [cluster_rid]
+    else:
+        rids = relation_ids('cluster')
+
+    shared_db_rel_id = (relation_ids('shared-db') or [None])[0]
+    if not shared_db_rel_id:
+        return False
+
+    for c_rid in rids:
+        units = related_units(relid=c_rid) + [local_unit()]
+        for unit in units:
+            settings = relation_get(unit=unit, rid=c_rid) or {}
+            for key in [NEUTRON_DB_INIT_RKEY, NEUTRON_DB_INIT_ECHO_RKEY]:
+                if shared_db_rel_id in settings.get(key, ''):
+                    return True
+
+    return False
+
+
+def is_new_dbinit_notification(init_id, echoed_init_id):
+    """Returns True if we have a received a new db initialisation notification
+    from a peer unit and we have not previously echoed it to indicate that we
+    have already performed the necessary actions as result.
+
+    Initialisation notification is expected to be of the format:
+
+    <unit-id-leader-unit>-<shared-db-rel-id>-<uuid>
+
+    @param init_db: received initialisation notification.
+    @param echoed_init_db: value currently set for the echo key.
+    @return: True if new notification and False if not.
+    """
+    shared_db_rel_id = (relation_ids('shared-db') or [None])[0]
+    return (shared_db_rel_id and init_id and
+            (local_unit() not in init_id) and
+            (shared_db_rel_id in init_id) and
+            (echoed_init_id != init_id))
+
+
+def check_local_db_actions_complete():
+    """Check if we have received db init'd notification and restart services
+    if we have not already.
+
+    NOTE: this must only be called from peer relation context.
+    """
+    if not is_db_initialised():
+        return
+
+    settings = relation_get() or {}
+    if settings:
+        init_id = settings.get(NEUTRON_DB_INIT_RKEY)
+        echoed_init_id = relation_get(unit=local_unit(),
+                                      attribute=NEUTRON_DB_INIT_ECHO_RKEY)
+
+        # If we have received an init notification from a peer unit
+        # (assumed to be the leader) then restart neutron-api and echo the
+        # notification and don't restart again unless we receive a new
+        # (different) notification.
+        if is_new_dbinit_notification(init_id, echoed_init_id):
+            if not is_unit_paused_set():
+                log("Restarting neutron services following db "
+                    "initialisation", level=DEBUG)
+                service_restart('neutron-server')
+
+            # Echo notification
+            relation_set(**{NEUTRON_DB_INIT_ECHO_RKEY: init_id})
 
 
 def api_port(service):
@@ -311,26 +384,18 @@ def determine_packages(source=None):
 
     release = get_os_codename_install_source(source)
 
-    if release >= 'kilo':
+    if CompareOpenStackReleases(release) >= 'kilo':
         packages.extend(KILO_PACKAGES)
+    if CompareOpenStackReleases(release) >= 'pike':
+        packages.remove('python-neutron-vpnaas')
+        packages.append('python-neutron-dynamic-routing')
 
-    if release == 'kilo' or release >= 'mitaka':
+    if release == 'kilo' or CompareOpenStackReleases(release) >= 'mitaka':
         packages.append('python-networking-hyperv')
 
     if config('neutron-plugin') == 'vsp':
         nuage_pkgs = config('nuage-packages').split()
         packages += nuage_pkgs
-
-    if git_install_requested():
-        packages.extend(BASE_GIT_PACKAGES)
-        # don't include packages that will be installed from git
-        packages = list(set(packages))
-        for p in GIT_PACKAGE_BLACKLIST:
-            if p in packages:
-                packages.remove(p)
-        if release >= 'kilo':
-            for p in GIT_PACKAGE_BLACKLIST_KILO:
-                packages.remove(p)
 
     packages.extend(token_cache_pkgs(release=release))
     return list(set(packages))
@@ -356,7 +421,7 @@ def resource_map(release=None):
     release = release or os_release('neutron-common')
 
     resource_map = deepcopy(BASE_RESOURCE_MAP)
-    if release >= 'liberty':
+    if CompareOpenStackReleases(release) >= 'liberty':
         resource_map.update(LIBERTY_RESOURCE_MAP)
 
     if os.path.exists('/etc/apache2/conf-available'):
@@ -379,10 +444,11 @@ def resource_map(release=None):
         resource_map[conf]['contexts'].append(
             neutron_api_context.NeutronCCContext())
 
-        # update for postgres
-        resource_map[conf]['contexts'].append(
-            context.PostgresqlDBContext(database=config('database')))
-
+        if ('kilo' <= CompareOpenStackReleases(release) <= 'mitaka' and
+                config('enable-sriov')):
+            resource_map[ML2_SRIOV_INI] = {}
+            resource_map[ML2_SRIOV_INI]['services'] = services
+            resource_map[ML2_SRIOV_INI]['contexts'] = []
     else:
         resource_map[NEUTRON_CONF]['contexts'].append(
             neutron_api_context.NeutronApiSDNContext()
@@ -393,6 +459,7 @@ def resource_map(release=None):
         resource_map[MEMCACHED_CONF] = {
             'contexts': [context.MemcacheContext()],
             'services': ['memcached']}
+
     return resource_map
 
 
@@ -400,14 +467,14 @@ def register_configs(release=None):
     release = release or os_release('neutron-common')
     configs = templating.OSConfigRenderer(templates_dir=TEMPLATES,
                                           openstack_release=release)
-    for cfg, rscs in resource_map().iteritems():
+    for cfg, rscs in resource_map().items():
         configs.register(cfg, rscs['contexts'])
     return configs
 
 
 def restart_map():
     return OrderedDict([(cfg, v['services'])
-                        for cfg, v in resource_map().iteritems()
+                        for cfg, v in resource_map().items()
                         if v['services']])
 
 
@@ -448,7 +515,8 @@ def do_openstack_upgrade(configs):
     ]
     apt_update(fatal=True)
     apt_upgrade(options=dpkg_opts, fatal=True, dist=True)
-    pkgs = determine_packages(new_os_rel)
+    reset_os_release()
+    pkgs = determine_packages(new_src)
     # Sort packages just to make unit tests easier
     pkgs.sort()
     apt_install(packages=pkgs,
@@ -460,9 +528,9 @@ def do_openstack_upgrade(configs):
     # Before kilo it's nova-cloud-controllers job
     if is_elected_leader(CLUSTER_RES):
         # Stamping seems broken and unnecessary in liberty (Bug #1536675)
-        if os_release('neutron-common') < 'liberty':
+        if CompareOpenStackReleases(os_release('neutron-common')) < 'liberty':
             stamp_neutron_database(cur_os_rel)
-        migrate_neutron_database()
+        migrate_neutron_database(upgrade=True)
 
 
 def stamp_neutron_database(release):
@@ -510,8 +578,13 @@ def nuage_vsp_juno_neutron_migration():
         raise Exception(e)
 
 
-def migrate_neutron_database():
+def migrate_neutron_database(upgrade=False):
     '''Initializes a new database or upgrades an existing database.'''
+
+    if not upgrade and is_db_initialised():
+        log("Database is already initialised.", level=DEBUG)
+        return
+
     log('Migrating the neutron database.')
     if(os_release('neutron-server') == 'juno' and
        config('neutron-plugin') == 'vsp'):
@@ -527,30 +600,60 @@ def migrate_neutron_database():
                'head']
         subprocess.check_output(cmd)
 
+    cluster_rids = relation_ids('cluster')
+    if cluster_rids:
+        # Notify peers so that services get restarted
+        log("Notifying peer(s) that db is initialised and restarting services",
+            level=DEBUG)
+        for r_id in cluster_rids:
+            if not is_unit_paused_set():
+                service_restart('neutron-server')
 
-def get_topics():
-    return ['q-l3-plugin',
-            'q-firewall-plugin',
-            'n-lbaas-plugin',
-            'ipsec_driver',
-            'q-metering-plugin',
-            'q-plugin',
-            'neutron']
+            # Notify peers that tey should also restart their services
+            shared_db_rel_id = (relation_ids('shared-db') or [None])[0]
+            id = "{}-{}-{}".format(local_unit(), shared_db_rel_id,
+                                   uuid.uuid4())
+            relation_set(relation_id=r_id, **{NEUTRON_DB_INIT_RKEY: id})
 
 
 def setup_ipv6():
     ubuntu_rel = lsb_release()['DISTRIB_CODENAME'].lower()
-    if ubuntu_rel < "trusty":
+    if CompareHostReleases(ubuntu_rel) < "trusty":
         raise Exception("IPv6 is not supported in the charms for Ubuntu "
                         "versions less than Trusty 14.04")
 
     # Need haproxy >= 1.5.3 for ipv6 so for Trusty if we are <= Kilo we need to
     # use trusty-backports otherwise we can use the UCA.
-    if ubuntu_rel == 'trusty' and os_release('neutron-server') < 'liberty':
+    this_os_release = os_release('neutron-server')
+    if (ubuntu_rel == 'trusty' and
+            CompareOpenStackReleases(this_os_release) < 'liberty'):
         add_source('deb http://archive.ubuntu.com/ubuntu trusty-backports '
                    'main')
         apt_update()
         apt_install('haproxy/trusty-backports', fatal=True)
+
+
+class FakeNeutronClient(object):
+    '''Fake wrapper for Neutron Client'''
+
+    def __init__(self, username, password, tenant_name,
+                 auth_url, region_name):
+        self.env = {
+            'OS_USERNAME': username,
+            'OS_PASSWORD': password,
+            'OS_TENANT_NAME': tenant_name,
+            'OS_AUTH_URL': auth_url,
+            'OS_REGION': region_name,
+        }
+
+    def list_routers(self):
+        cmd = ['neutron', 'router-list', '-f', 'yaml']
+        try:
+            routers = subprocess.check_output(
+                cmd, env=self.env).decode('UTF-8')
+            return {'routers': yaml.load(routers)}
+        except subprocess.CalledProcessError:
+            return {'routers': []}
 
 
 def get_neutron_client():
@@ -558,17 +661,15 @@ def get_neutron_client():
     env = neutron_api_context.IdentityServiceContext()()
     if not env:
         log('Unable to check resources at this time')
-        return
+        return None
 
-    auth_url = '%(auth_protocol)s://%(auth_host)s:%(auth_port)s/v2.0' % env
-    # Late import to avoid install hook failures when pkg hasnt been installed
-    from neutronclient.v2_0 import client
-    neutron_client = client.Client(username=env['admin_user'],
-                                   password=env['admin_password'],
-                                   tenant_name=env['admin_tenant_name'],
-                                   auth_url=auth_url,
-                                   region_name=env['region'])
-    return neutron_client
+    auth_url = '{auth_protocol}://{auth_host}:{auth_port}/v2.0'.format(**env)
+
+    return FakeNeutronClient(username=env['admin_user'],
+                             password=env['admin_password'],
+                             tenant_name=env['admin_tenant_name'],
+                             auth_url=auth_url,
+                             region_name=env['region'])
 
 
 def router_feature_present(feature):
@@ -597,110 +698,6 @@ def neutron_ready():
     except:
         log('neutron query failed, neutron not ready ')
         return False
-
-
-def git_install(projects_yaml):
-    """Perform setup, and install git repos specified in yaml parameter."""
-    if git_install_requested():
-        git_pre_install()
-        projects_yaml = git_default_repos(projects_yaml)
-        git_clone_and_install(projects_yaml, core_project='neutron')
-        git_post_install(projects_yaml)
-
-
-def git_pre_install():
-    """Perform pre-install setup."""
-    dirs = [
-        '/var/lib/neutron',
-        '/var/lib/neutron/lock',
-        '/var/log/neutron',
-    ]
-
-    logs = [
-        '/var/log/neutron/server.log',
-    ]
-
-    adduser('neutron', shell='/bin/bash', system_user=True)
-    add_group('neutron', system_group=True)
-    add_user_to_group('neutron', 'neutron')
-
-    for d in dirs:
-        mkdir(d, owner='neutron', group='neutron', perms=0755, force=False)
-
-    for l in logs:
-        write_file(l, '', owner='neutron', group='neutron', perms=0600)
-
-
-def git_post_install(projects_yaml):
-    """Perform post-install setup."""
-    http_proxy = git_yaml_value(projects_yaml, 'http_proxy')
-    if http_proxy:
-        pip_install('mysql-python', proxy=http_proxy,
-                    venv=git_pip_venv_dir(projects_yaml))
-    else:
-        pip_install('mysql-python',
-                    venv=git_pip_venv_dir(projects_yaml))
-
-    src_etc = os.path.join(git_src_dir(projects_yaml, 'neutron'), 'etc')
-    configs = [
-        {'src': src_etc,
-         'dest': '/etc/neutron'},
-        {'src': os.path.join(src_etc, 'neutron/plugins'),
-         'dest': '/etc/neutron/plugins'},
-        {'src': os.path.join(src_etc, 'neutron/rootwrap.d'),
-         'dest': '/etc/neutron/rootwrap.d'},
-    ]
-
-    for c in configs:
-        if os.path.exists(c['dest']):
-            shutil.rmtree(c['dest'])
-        shutil.copytree(c['src'], c['dest'])
-
-    # NOTE(coreycb): Need to find better solution than bin symlinks.
-    symlinks = [
-        {'src': os.path.join(git_pip_venv_dir(projects_yaml),
-                             'bin/neutron-rootwrap'),
-         'link': '/usr/local/bin/neutron-rootwrap'},
-        {'src': os.path.join(git_pip_venv_dir(projects_yaml),
-                             'bin/neutron-db-manage'),
-         'link': '/usr/local/bin/neutron-db-manage'},
-    ]
-
-    for s in symlinks:
-        if os.path.lexists(s['link']):
-            os.remove(s['link'])
-        os.symlink(s['src'], s['link'])
-
-    render('git/neutron_sudoers', '/etc/sudoers.d/neutron_sudoers', {},
-           perms=0o440)
-
-    bin_dir = os.path.join(git_pip_venv_dir(projects_yaml), 'bin')
-    # Use systemd init units/scripts from ubuntu wily onward
-    if lsb_release()['DISTRIB_RELEASE'] >= '15.10':
-        templates_dir = os.path.join(charm_dir(), 'templates/git')
-        daemon = 'neutron-server'
-        neutron_api_context = {
-            'daemon_path': os.path.join(bin_dir, daemon),
-        }
-        template_file = 'git/{}.init.in.template'.format(daemon)
-        init_in_file = '{}.init.in'.format(daemon)
-        render(template_file, os.path.join(templates_dir, init_in_file),
-               neutron_api_context, perms=0o644)
-        git_generate_systemd_init_files(templates_dir)
-    else:
-        neutron_api_context = {
-            'service_description': 'Neutron API server',
-            'charm_name': 'neutron-api',
-            'process_name': 'neutron-server',
-            'executable_name': os.path.join(bin_dir, 'neutron-server'),
-        }
-
-        render('git/upstart/neutron-server.upstart',
-               '/etc/init/neutron-server.conf',
-               neutron_api_context, perms=0o644)
-
-    if not is_unit_paused_set():
-        service_restart('neutron-server')
 
 
 def get_optional_interfaces():

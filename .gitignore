@@ -8,3 +8,6 @@ tags
 .unit-state.db
 trusty/
 xenial/
+.stestr
+__pycache__
+func-results.json
