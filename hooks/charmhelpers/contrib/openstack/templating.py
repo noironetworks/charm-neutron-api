@@ -15,6 +15,7 @@
 import os
 
 import six
+import yaml
 
 from charmhelpers.fetch import apt_install, apt_update
 from charmhelpers.core.hookenv import (
