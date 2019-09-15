@@ -141,10 +141,12 @@ NEUTRON_VPNAAS_CONF = '%s/neutron_vpnaas.conf' % NEUTRON_CONF_DIR
 HAPROXY_CONF = '/etc/haproxy/haproxy.cfg'
 APACHE_CONF = '/etc/apache2/sites-available/openstack_https_frontend'
 APACHE_24_CONF = '/etc/apache2/sites-available/openstack_https_frontend.conf'
+APACHE_SSL_DIR = '/etc/apache2/ssl/neutron'
 NEUTRON_DEFAULT = '/etc/default/neutron-server'
 CA_CERT_PATH = '/usr/local/share/ca-certificates/keystone_juju_ca_cert.crt'
 MEMCACHED_CONF = '/etc/memcached.conf'
 API_PASTE_INI = '%s/api-paste.ini' % NEUTRON_CONF_DIR
+ADMIN_POLICY = "/etc/neutron/policy.d/00-admin.json"
 # NOTE:(fnordahl) placeholder ml2_conf_srov.ini pointing users to ml2_conf.ini
 # Due to how neutron init scripts are laid out on various Linux
 # distributions we put the [ml2_sriov] section in ml2_conf.ini instead
@@ -172,7 +174,8 @@ BASE_RESOURCE_MAP = OrderedDict([
                      context.WorkerConfigContext(),
                      context.InternalEndpointContext(),
                      context.MemcacheContext(),
-                     neutron_api_context.DesignateContext()],
+                     neutron_api_context.DesignateContext(),
+                     neutron_api_context.NeutronInfobloxContext()],
     }),
     (NEUTRON_DEFAULT, {
         'services': ['neutron-server'],
@@ -409,7 +412,7 @@ def determine_packages(source=None):
         if release == 'kilo' or cmp_release >= 'mitaka':
             packages.append('python-networking-hyperv')
 
-    if config('neutron-plugin') == 'vsp':
+    if config('neutron-plugin') == 'vsp' and cmp_release < 'newton':
         nuage_pkgs = config('nuage-packages').split()
         packages.extend(nuage_pkgs)
 
@@ -459,6 +462,13 @@ def resource_map(release=None):
     release = release or os_release('neutron-common')
 
     resource_map = deepcopy(BASE_RESOURCE_MAP)
+    if CompareOpenStackReleases(release) >= 'queens':
+        resource_map[ADMIN_POLICY] = {
+            'contexts': [
+                neutron_api_context.IdentityServiceContext(
+                    service='neutron',
+                    service_user='neutron')],
+            'services': ['neutron-server']}
     if CompareOpenStackReleases(release) >= 'liberty':
         resource_map.update(LIBERTY_RESOURCE_MAP)
 
@@ -511,9 +521,13 @@ def register_configs(release=None):
 
 
 def restart_map():
-    return OrderedDict([(cfg, v['services'])
-                        for cfg, v in resource_map().items()
-                        if v['services']])
+    restart_map = OrderedDict([(cfg, v['services'])
+                               for cfg, v in resource_map().items()
+                               if v['services']])
+    if os.path.isdir(APACHE_SSL_DIR):
+        restart_map['{}/*'.format(APACHE_SSL_DIR)] = ['apache2',
+                                                      'neutron-server']
+    return restart_map
 
 
 def services():

@@ -250,6 +250,17 @@ class GeneralTests(CharmTestCase):
         self.assertEqual(context.get_ml2_mechanism_drivers(),
                          'openvswitch,hyperv,sriovnicswitch')
 
+    def test_is_nfg_logging_enabled(self):
+        self.os_release.return_value = 'stein'
+        self.test_config.set('enable-firewall-group-logging', True)
+        self.assertTrue(context.is_nfg_logging_enabled())
+        self.os_release.return_value = 'stein'
+        self.test_config.set('enable-firewall-group-logging', False)
+        self.assertFalse(context.is_nfg_logging_enabled())
+        self.os_release.return_value = 'queens'
+        self.test_config.set('enable-firewall-group-logging', True)
+        self.assertFalse(context.is_nfg_logging_enabled())
+
 
 class IdentityServiceContext(CharmTestCase):
 
@@ -260,6 +271,7 @@ class IdentityServiceContext(CharmTestCase):
         self.test_config.set('region', 'region457')
         self.test_config.set('prefer-ipv6', False)
 
+    @patch.object(charmhelpers.contrib.openstack.context, 'os_release')
     @patch.object(charmhelpers.contrib.openstack.context, 'format_ipv6_addr')
     @patch.object(charmhelpers.contrib.openstack.context, 'context_complete')
     @patch.object(charmhelpers.contrib.openstack.context, 'relation_get')
@@ -267,7 +279,8 @@ class IdentityServiceContext(CharmTestCase):
     @patch.object(charmhelpers.contrib.openstack.context, 'relation_ids')
     @patch.object(charmhelpers.contrib.openstack.context, 'log')
     def test_ids_ctxt(self, _log, _rids, _runits, _rget, _ctxt_comp,
-                      format_ipv6_addr):
+                      format_ipv6_addr, _os_release):
+        _os_release.return_value = 'rocky'
         _rids.return_value = 'rid1'
         _runits.return_value = 'runit'
         _ctxt_comp.return_value = True
@@ -284,9 +297,11 @@ class IdentityServiceContext(CharmTestCase):
         ids_ctxt = context.IdentityServiceContext()
         self.assertEqual(ids_ctxt()['region'], 'region457')
 
+    @patch.object(charmhelpers.contrib.openstack.context, 'os_release')
     @patch.object(charmhelpers.contrib.openstack.context, 'relation_ids')
     @patch.object(charmhelpers.contrib.openstack.context, 'log')
-    def test_ids_ctxt_no_rels(self, _log, _rids):
+    def test_ids_ctxt_no_rels(self, _log, _rids, _os_release):
+        _os_release.return_value = 'rocky'
         _rids.return_value = []
         ids_ctxt = context.IdentityServiceContext()
         self.assertEqual(ids_ctxt(), None)
@@ -1433,3 +1448,54 @@ class NeutronLoadBalancerContextTest(CharmTestCase):
                                 'base_url': 'http://1.2.3.4:1234'})
         with self.assertRaises(ValueError):
             context.NeutronLoadBalancerContext()()
+
+
+class NeutronInfobloxContextTest(CharmTestCase):
+
+    def setUp(self):
+        super(NeutronInfobloxContextTest, self).setUp(context, TO_PATCH)
+        self.relation_get.side_effect = self.test_relation.get
+        self.config.side_effect = self.test_config.get
+
+    def tearDown(self):
+        super(NeutronInfobloxContextTest, self).tearDown()
+
+    def test_infoblox_no_related_units(self):
+        self.related_units.return_value = []
+        ctxt = context.NeutronInfobloxContext()()
+        expect = {}
+
+        self.assertEqual(expect, ctxt)
+
+    def test_infoblox_related_units(self):
+        self.related_units.return_value = ['unit1']
+        self.relation_ids.return_value = ['rid1']
+        self.test_relation.set(
+            {'dc_id': '0',
+             'grid_master_host': 'foo',
+             'grid_master_name': 'bar',
+             'admin_user_name': 'faz',
+             'admin_password': 'baz'})
+        ctxt = context.NeutronInfobloxContext()()
+        expect = {'enable_infoblox': True,
+                  'cloud_data_center_id': '0',
+                  'grid_master_host': 'foo',
+                  'grid_master_name': 'bar',
+                  'infoblox_admin_user_name': 'faz',
+                  'infoblox_admin_password': 'baz',
+                  'wapi_version': '2.3',
+                  'wapi_max_results': '-50000',
+                  'wapi_paging': True}
+
+        self.assertEqual(expect, ctxt)
+
+    def test_infoblox_related_units_missing_data(self):
+        self.related_units.return_value = ['unit1']
+        self.relation_ids.return_value = ['rid1']
+        self.test_relation.set(
+            {'dc_id': '0',
+             'grid_master_host': 'foo'})
+        ctxt = context.NeutronInfobloxContext()()
+        expect = {}
+
+        self.assertEqual(expect, ctxt)

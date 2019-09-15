@@ -180,6 +180,19 @@ class TestNeutronAPIUtils(CharmTestCase):
 
     @patch.object(nutils, 'manage_plugin')
     @patch('os.path.exists')
+    def test_resource_map_queens(self, _path_exists, _manage_plugin):
+        _path_exists.return_value = False
+        _manage_plugin.return_value = True
+        self.os_release.return_value = 'queens'
+        _map = nutils.resource_map()
+        confs = [nutils.NEUTRON_CONF, nutils.NEUTRON_DEFAULT,
+                 nutils.APACHE_CONF, nutils.NEUTRON_LBAAS_CONF,
+                 nutils.NEUTRON_VPNAAS_CONF, nutils.ADMIN_POLICY]
+        [self.assertIn(q_conf, _map.keys()) for q_conf in confs]
+        self.assertTrue(nutils.APACHE_24_CONF not in _map.keys())
+
+    @patch.object(nutils, 'manage_plugin')
+    @patch('os.path.exists')
     def test_resource_map_apache24(self, _path_exists, _manage_plugin):
         self.os_release.return_value = 'havana'
         _path_exists.return_value = True
@@ -220,6 +233,26 @@ class TestNeutronAPIUtils(CharmTestCase):
             (nutils.APACHE_CONF, ['apache2']),
             (nutils.HAPROXY_CONF, ['haproxy']),
             (ML2CONF, ['neutron-server']),
+        ])
+        self.assertEqual(_restart_map, expect)
+
+    @patch.object(nutils.os.path, 'isdir')
+    @patch.object(nutils.os.path, 'exists')
+    def test_restart_map_ssl(self, mock_path_exists, mock_path_isdir):
+        self.os_release.return_value = 'havana'
+        mock_path_exists.return_value = False
+        mock_path_isdir.return_value = True
+        _restart_map = nutils.restart_map()
+        ML2CONF = "/etc/neutron/plugins/ml2/ml2_conf.ini"
+        expect = OrderedDict([
+            (nutils.NEUTRON_CONF, ['neutron-server']),
+            (nutils.NEUTRON_DEFAULT, ['neutron-server']),
+            (nutils.API_PASTE_INI, ['neutron-server']),
+            (nutils.APACHE_CONF, ['apache2']),
+            (nutils.HAPROXY_CONF, ['haproxy']),
+            (ML2CONF, ['neutron-server']),
+            ('{}/*'.format(nutils.APACHE_SSL_DIR),
+             ['apache2', 'neutron-server']),
         ])
         self.assertEqual(_restart_map, expect)
 

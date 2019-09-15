@@ -245,6 +245,22 @@ def is_nsg_logging_enabled():
     return False
 
 
+def is_nfg_logging_enabled():
+    """
+    Check if Neutron firewall groups logging should be enabled.
+    """
+    if config('enable-firewall-group-logging'):
+
+        if CompareOpenStackReleases(os_release('neutron-server')) < 'stein':
+            log("The logging option is only supported on Stein or later",
+                ERROR)
+            return False
+
+        return True
+
+    return False
+
+
 def is_vlan_trunking_requested_and_valid():
     """Check whether VLAN trunking should be enabled by checking whether
        it has been requested and, if it has, is it supported in the current
@@ -408,7 +424,7 @@ class NeutronCCContext(context.NeutronContext):
         ctxt['external_network'] = config('neutron-external-network')
         release = os_release('neutron-server')
         cmp_release = CompareOpenStackReleases(release)
-        if config('neutron-plugin') in ['vsp']:
+        if config('neutron-plugin') == 'vsp' and cmp_release < 'newton':
             _config = config()
             for k, v in _config.items():
                 if k.startswith('vsd'):
@@ -570,6 +586,9 @@ class NeutronCCContext(context.NeutronContext):
                 'stein': ['router', 'firewall_v2', 'metering', 'segments',
                           ('neutron_dynamic_routing.'
                            'services.bgp.bgp_plugin.BgpPlugin')],
+                'train': ['router', 'firewall_v2', 'metering', 'segments',
+                          ('neutron_dynamic_routing.'
+                           'services.bgp.bgp_plugin.BgpPlugin')],
             }
             if cmp_release >= 'rocky':
                 if ctxt.get('load_balancer_name', None):
@@ -585,7 +604,7 @@ class NeutronCCContext(context.NeutronContext):
             ctxt['service_plugins'] = service_plugins.get(
                 release, service_plugins['stein'])
 
-            if is_nsg_logging_enabled():
+            if is_nsg_logging_enabled() or is_nfg_logging_enabled():
                 ctxt['service_plugins'].append('log')
 
             if is_qos_requested_and_valid():
@@ -861,7 +880,7 @@ class NeutronAMQPContext(context.AMQPContext):
         # TODO (dparv) The class to be removed in next charm release
         # and from BASE_RESOURCE_MAP neutron_api_utils.py as well
         if not context:
-            return
+            return context
         context['notification_topics'] = ','.join(NOTIFICATION_TOPICS)
         return context
 
@@ -887,7 +906,6 @@ class DesignateContext(context.OSContextGenerator):
                     config('ipv6-ptr-zone-prefix-size'))
         return ctxt
 
-
 class CiscoAciContext(context.OSContextGenerator):
     def __init__(self, rel_name='neutron-plugin-api-subordinate'):
         self.rel_name = rel_name
@@ -905,3 +923,42 @@ class CiscoAciContext(context.OSContextGenerator):
                     if self.context_complete(ctxt):
                         return ctxt
         return {}
+
+class NeutronInfobloxContext(context.OSContextGenerator):
+    '''Infoblox IPAM context for Neutron API'''
+    interfaces = ['infoblox-neutron']
+
+    def __call__(self):
+        ctxt = {}
+        rdata = {}
+        for rid in relation_ids('infoblox-neutron'):
+            if related_units(rid) and not rdata:
+                for unit in related_units(rid):
+                    rdata = relation_get(rid=rid, unit=unit)
+                    ctxt['cloud_data_center_id'] = rdata.get('dc_id')
+                    break
+        if ctxt.get('cloud_data_center_id') is not None:
+            if not self.check_requirements(rdata):
+                log('Missing Infoblox connection information, passing.')
+                return {}
+            ctxt['enable_infoblox'] = True
+            ctxt['cloud_data_center_id'] = rdata.get('dc_id')
+            ctxt['grid_master_host'] = rdata.get('grid_master_host')
+            ctxt['grid_master_name'] = rdata.get('grid_master_name')
+            ctxt['infoblox_admin_user_name'] = rdata.get('admin_user_name')
+            ctxt['infoblox_admin_password'] = rdata.get('admin_password')
+            # the next three values are non-critical and may accept defaults
+            ctxt['wapi_version'] = rdata.get('wapi_version', '2.3')
+            ctxt['wapi_max_results'] = rdata.get('wapi_max_results', '-50000')
+            ctxt['wapi_paging'] = rdata.get('wapi_paging', True)
+        return ctxt
+
+    def check_requirements(self, rdata):
+        required = [
+            'grid_master_name',
+            'grid_master_host',
+            'admin_user_name',
+            'admin_password',
+        ]
+        return len(set(p for p, v in rdata.items() if v).
+                   intersection(required)) == len(required)
