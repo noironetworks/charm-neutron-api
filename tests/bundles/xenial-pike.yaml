@@ -5,13 +5,21 @@ series: &series xenial
 
 applications:
   percona-cluster:
+<<<<<<< HEAD
     constraints: mem=3072M
     charm: cs:~openstack-charmers/percona-cluster
+=======
+    charm: cs:percona-cluster
+>>>>>>> 5c819eb7051c63d9d89c628e893475bffd8fe3b0
     num_units: 1
     options:
       source: *openstack-origin
   rabbitmq-server:
+<<<<<<< HEAD
     charm: cs:~openstack-charmers/rabbitmq-server
+=======
+    charm: cs:rabbitmq-server
+>>>>>>> 5c819eb7051c63d9d89c628e893475bffd8fe3b0
     num_units: 1
     options:
       source: *openstack-origin
@@ -24,10 +32,56 @@ applications:
       neutron-security-groups: true
       openstack-origin: *openstack-origin
   keystone:
+<<<<<<< HEAD
     charm: cs:~openstack-charmers/keystone
     num_units: 1
     options:
       openstack-origin: *openstack-origin
+=======
+    charm: cs:keystone
+    num_units: 1
+    options:
+      openstack-origin: *openstack-origin
+    to:
+      - '3'
+  glance:
+    charm: cs:glance
+    num_units: 1
+    options:
+      openstack-origin: *openstack-origin
+    to:
+      - '4'
+  neutron-openvswitch:
+    charm: cs:neutron-openvswitch
+  neutron-gateway:
+    charm: cs:neutron-gateway
+    num_units: 1
+    options:
+      bridge-mappings: physnet1:br-ex
+      openstack-origin: *openstack-origin
+    to:
+      - '5'
+  nova-cloud-controller:
+    charm: cs:nova-cloud-controller
+    num_units: 1
+    options:
+      network-manager: Neutron
+      openstack-origin: *openstack-origin
+    to:
+      - '6'
+  nova-compute:
+    charm: cs:nova-compute
+    num_units: 2
+    options:
+      config-flags: default_ephemeral_format=ext4
+      enable-live-migration: true
+      enable-resize: true
+      migration-auth-type: ssh
+      openstack-origin: *openstack-origin
+    to:
+      - '7'
+      - '8'
+>>>>>>> 5c819eb7051c63d9d89c628e893475bffd8fe3b0
 relations:
   - - 'neutron-api:shared-db'
     - 'percona-cluster:shared-db'
