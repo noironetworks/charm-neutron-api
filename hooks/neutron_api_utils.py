@@ -110,6 +110,7 @@ KILO_PACKAGES = [
 PY3_PACKAGES = [
     'python3-neutron',
     'python3-neutron-lbaas',
+    'libssl3',
     'python3-neutron-dynamic-routing',
     'python3-networking-hyperv',
     'python3-memcache',
