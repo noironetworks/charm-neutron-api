@@ -110,6 +110,7 @@ KILO_PACKAGES = [
 PY3_PACKAGES = [
     'python3-neutron',
     'python3-neutron-lbaas',
+    'python3-neutron-fwaas',
     'python3-neutron-dynamic-routing',
     'python3-networking-hyperv',
     'python3-memcache',
@@ -451,6 +452,7 @@ def manage_plugin():
 
 def determine_packages(source=None, openstack_release=None):
     # currently all packages match service names
+    ubuntu_rel = lsb_release()['DISTRIB_CODENAME'].lower()
     if openstack_release:
         release = openstack_release
     else:
@@ -462,6 +464,8 @@ def determine_packages(source=None, openstack_release=None):
         packages.extend(PY3_PACKAGES)
         if cmp_release >= 'train':
             packages.remove('python3-neutron-lbaas')
+        if ubuntu_rel == "jammy":
+            packages.remove('python3-neutron-fwaas')
 
     for v in resource_map().values():
         packages.extend(v['services'])
