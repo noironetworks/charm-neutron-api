@@ -69,6 +69,7 @@ OPENSTACK_RELEASES_PAIRS = [
     'focal_yoga', 'jammy_yoga',
     'jammy_zed', 'kinetic_zed',
     'jammy_antelope', 'lunar_antelope',
+    'jammy_bobcat', 'mantic_bobcat',
 ]
 
 
