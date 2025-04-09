@@ -238,6 +238,14 @@ CLOUD_ARCHIVE_POCKETS = {
     'antelope/proposed': 'jammy-proposed/antelope',
     'jammy-antelope/proposed': 'jammy-proposed/antelope',
     'jammy-proposed/antelope': 'jammy-proposed/antelope',
+    #bobcat
+    'bobcat': 'jammy-updates/bobcat',
+    'jammy-bobcat': 'jammy-updates/bobcat',
+    'jammy-bobcat/updates': 'jammy-updates/bobcat',
+    'jammy-updates/bobcat': 'jammy-updates/bobcat',
+    'bobcat/proposed': 'jammy-proposed/bobcat',
+    'jammy-bobcat/proposed': 'jammy-proposed/bobcat',
+    'jammy-proposed/bobcat': 'jammy-proposed/bobcat',
 }
 
 

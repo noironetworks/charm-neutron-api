@@ -149,6 +149,7 @@ OPENSTACK_RELEASES = (
     'yoga',
     'zed',
     '2023.1',
+    '2023.2',
 )
 
 UBUNTU_OPENSTACK_RELEASE = OrderedDict([
@@ -176,6 +177,7 @@ UBUNTU_OPENSTACK_RELEASE = OrderedDict([
     ('jammy', 'yoga'),
     ('kinetic', 'zed'),
     ('lunar','2023.1'),
+    ('mantic', '2023.2'),
 ])
 
 
@@ -204,6 +206,7 @@ OPENSTACK_CODENAMES = OrderedDict([
     ('2022.1', 'yoga'),
     ('2022.2', 'zed'),
     ('2023.1', 'antelope'),
+    ('2023.2', 'bobcat'),
 ])
 
 # The ugly duckling - must list releases oldest to newest
@@ -256,6 +259,8 @@ SWIFT_CODENAMES = OrderedDict([
         ['2.30.0']),
     ('2023.1',
         ['2.31.0']),    
+    ('2023.2',
+        ['2.32.0']),
 ])
 
 # >= Liberty version->codename mapping
@@ -277,6 +282,7 @@ PACKAGE_CODENAMES = {
         ('25', 'yoga'),
         ('26', 'zed'),
         ('27','2023.1'),
+        ('28','2023.2'),
     ]),
     'neutron-common': OrderedDict([
         ('7', 'liberty'),
@@ -295,6 +301,7 @@ PACKAGE_CODENAMES = {
         ('20', 'yoga'),
         ('21', 'zed'),
         ('22','2023.1'),
+        ('23','2023.2'),
     ]),
     'cinder-common': OrderedDict([
         ('7', 'liberty'),
@@ -313,6 +320,7 @@ PACKAGE_CODENAMES = {
         ('20', 'yoga'),
         ('21', 'zed'),
         ('22','2023.1'),
+        ('23','2023.2'),
         ]),
     'keystone': OrderedDict([
         ('8', 'liberty'),
@@ -331,6 +339,7 @@ PACKAGE_CODENAMES = {
         ('21', 'yoga'),
         ('22', 'zed'),
         ('23','2023.1'),
+        ('24','2023.2'),
     ]),
     'horizon-common': OrderedDict([
         ('8', 'liberty'),
@@ -349,6 +358,7 @@ PACKAGE_CODENAMES = {
         ('21', 'yoga'),
         ('22', 'zed'),
         ('23','2023.1'),
+        ('24','2023.2'),
     ]),
     'ceilometer-common': OrderedDict([
         ('5', 'liberty'),
@@ -367,6 +377,7 @@ PACKAGE_CODENAMES = {
         ('18', 'yoga'),
         ('19', 'zed'),
         ('20','2023.1'),
+        ('21','2023.2'),
     ]),
     'heat-common': OrderedDict([
         ('5', 'liberty'),
@@ -385,6 +396,7 @@ PACKAGE_CODENAMES = {
         ('18', 'yoga'),
         ('19', 'zed'),
         ('20','2023.1'),
+        ('21','2023.2'),
     ]),
     'glance-common': OrderedDict([
         ('11', 'liberty'),
@@ -403,6 +415,7 @@ PACKAGE_CODENAMES = {
         ('24', 'yoga'),
         ('25', 'zed'),
         ('26','2023.1'),
+        ('27','2023.2'),
     ]),
     'openstack-dashboard': OrderedDict([
         ('8', 'liberty'),
@@ -421,6 +434,7 @@ PACKAGE_CODENAMES = {
         ('22', 'yoga'),
         ('23', 'zed'),
         ('24', '2023.1'),
+        ('25','2023.2'),
     ]),
 }
 
@@ -460,6 +474,11 @@ def get_os_codename_install_source(src):
     '''Derive OpenStack release codename from a given installation source.'''
     ubuntu_rel = lsb_release()['DISTRIB_CODENAME']
     rel = ''
+    cloud_release_dict = {
+        'antelope': '2023.1',
+        'bobcat': '2023.2',
+        # Add more mappings here as needed
+    }
     if src is None:
         return rel
     if src in ['distro', 'distro-proposed', 'proposed']:
@@ -474,7 +493,10 @@ def get_os_codename_install_source(src):
     if src.startswith('cloud:'):
         ca_rel = src.split(':')[1]
         ca_rel = ca_rel.split('-')[1].split('/')[0]
-        return '2023.1' if ca_rel == 'antelope' else ca_rel
+        if ca_rel in cloud_release_dict:
+            return cloud_release_dict[ca_rel]
+        else:
+            return ca_rel
 
     # Best guess match based on deb string provided
     if (src.startswith('deb') or
