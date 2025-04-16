@@ -26,7 +26,8 @@ UBUNTU_RELEASES = (
     'disco',
     'eoan',
     'focal',
-    'jammy'
+    'jammy',
+    'noble'
 )
 
 

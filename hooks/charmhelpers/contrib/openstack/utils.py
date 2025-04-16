@@ -150,6 +150,7 @@ OPENSTACK_RELEASES = (
     'zed',
     '2023.1',
     '2023.2',
+    '2024.1',
 )
 
 UBUNTU_OPENSTACK_RELEASE = OrderedDict([
@@ -178,6 +179,7 @@ UBUNTU_OPENSTACK_RELEASE = OrderedDict([
     ('kinetic', 'zed'),
     ('lunar','2023.1'),
     ('mantic', '2023.2'),
+    ('noble', '2024.1'),
 ])
 
 
@@ -207,6 +209,7 @@ OPENSTACK_CODENAMES = OrderedDict([
     ('2022.2', 'zed'),
     ('2023.1', 'antelope'),
     ('2023.2', 'bobcat'),
+    ('2024.1', 'caracal'),
 ])
 
 # The ugly duckling - must list releases oldest to newest
@@ -261,6 +264,8 @@ SWIFT_CODENAMES = OrderedDict([
         ['2.31.0']),    
     ('2023.2',
         ['2.32.0']),
+    ('2024.1',
+        ['2.33.0']),
 ])
 
 # >= Liberty version->codename mapping
@@ -283,6 +288,7 @@ PACKAGE_CODENAMES = {
         ('26', 'zed'),
         ('27','2023.1'),
         ('28','2023.2'),
+        ('29','2024.1'),
     ]),
     'neutron-common': OrderedDict([
         ('7', 'liberty'),
@@ -302,6 +308,7 @@ PACKAGE_CODENAMES = {
         ('21', 'zed'),
         ('22','2023.1'),
         ('23','2023.2'),
+        ('24','2024.1'),
     ]),
     'cinder-common': OrderedDict([
         ('7', 'liberty'),
@@ -321,6 +328,7 @@ PACKAGE_CODENAMES = {
         ('21', 'zed'),
         ('22','2023.1'),
         ('23','2023.2'),
+        ('24','2024.1'),
         ]),
     'keystone': OrderedDict([
         ('8', 'liberty'),
@@ -340,6 +348,7 @@ PACKAGE_CODENAMES = {
         ('22', 'zed'),
         ('23','2023.1'),
         ('24','2023.2'),
+        ('25','2024.1'),
     ]),
     'horizon-common': OrderedDict([
         ('8', 'liberty'),
@@ -359,6 +368,7 @@ PACKAGE_CODENAMES = {
         ('22', 'zed'),
         ('23','2023.1'),
         ('24','2023.2'),
+        ('25','2024.1'),
     ]),
     'ceilometer-common': OrderedDict([
         ('5', 'liberty'),
@@ -378,6 +388,7 @@ PACKAGE_CODENAMES = {
         ('19', 'zed'),
         ('20','2023.1'),
         ('21','2023.2'),
+        ('22','2024.1'),
     ]),
     'heat-common': OrderedDict([
         ('5', 'liberty'),
@@ -397,6 +408,7 @@ PACKAGE_CODENAMES = {
         ('19', 'zed'),
         ('20','2023.1'),
         ('21','2023.2'),
+        ('22','2024.1'),
     ]),
     'glance-common': OrderedDict([
         ('11', 'liberty'),
@@ -416,6 +428,7 @@ PACKAGE_CODENAMES = {
         ('25', 'zed'),
         ('26','2023.1'),
         ('27','2023.2'),
+        ('28','2024.1'),
     ]),
     'openstack-dashboard': OrderedDict([
         ('8', 'liberty'),
@@ -435,6 +448,7 @@ PACKAGE_CODENAMES = {
         ('23', 'zed'),
         ('24', '2023.1'),
         ('25','2023.2'),
+        ('26','2024.1'),
     ]),
 }
 
@@ -477,6 +491,7 @@ def get_os_codename_install_source(src):
     cloud_release_dict = {
         'antelope': '2023.1',
         'bobcat': '2023.2',
+        'caracal': '2024.1',
         # Add more mappings here as needed
     }
     if src is None:

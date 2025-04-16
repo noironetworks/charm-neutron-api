@@ -70,6 +70,7 @@ OPENSTACK_RELEASES_PAIRS = [
     'jammy_zed', 'kinetic_zed',
     'jammy_antelope', 'lunar_antelope',
     'jammy_bobcat', 'mantic_bobcat',
+    'jammy_caracal', 'noble_caracal',
 ]
 
 
