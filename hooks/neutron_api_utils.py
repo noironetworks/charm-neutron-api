@@ -96,7 +96,7 @@ BASE_PACKAGES = [
     'python-keystoneclient',
     'python-mysqldb',
     'python-psycopg2',
-    'python-six',
+    'python3-six',
     'uuid',
 ]
 
@@ -466,6 +466,8 @@ def determine_packages(source=None, openstack_release=None):
             packages.remove('python3-neutron-lbaas')
         if ubuntu_rel == "jammy":
             packages.remove('python3-neutron-fwaas')
+        if ubuntu_rel == "noble":
+            packages.remove('python3-networking-hyperv')
 
     for v in resource_map().values():
         packages.extend(v['services'])
